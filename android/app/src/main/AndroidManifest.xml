@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="travel_footprint"
+        android:label="旅行足迹"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

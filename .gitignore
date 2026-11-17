@@ -44,5 +44,9 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# ����Ŀ¼���ο�վ����������⣩
+# 辅助目录（参考站逆向产物，不入库）
 .ref/
+
+# 本地调试截图与数据构建缓存
+/shots/
+/tools/cache/
