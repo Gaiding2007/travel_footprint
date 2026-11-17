@@ -1,0 +1,26 @@
+name: travel_footprint
+description: 旅行足迹地图
+publish_to: 'none'
+version: 0.3.12+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_map: ^6.1.0
+  latlong2: ^0.9.0
+  shared_preferences: ^2.2.2
+  clipper2: ^0.0.3  # 替代 polygon_clipper
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/data/china_provinces.geojson
+    - assets/data/cities.geojson
