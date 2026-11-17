@@ -50,3 +50,6 @@ app.*.map.json
 # 本地调试截图与数据构建缓存
 /shots/
 /tools/cache/
+
+# 打包产物（发布用的 APK 副本）
+/dist/
