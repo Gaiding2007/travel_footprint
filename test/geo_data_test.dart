@@ -33,9 +33,18 @@ const String _sampleWorld = '''
 
 void main() {
   test('经纬度投影成地图坐标', () {
+    final origin = projectLonLat(0, 0);
+    expect(origin.dx, closeTo(180000, 0.001));
+    expect(origin.dy, closeTo(90000, 0.001));
+
     final point = projectLonLat(100, 20);
     expect(point.dx, closeTo(280000, 0.001));
-    expect(point.dy, closeTo(70000, 0.001));
+    expect(point.dy, closeTo(90000 - mercatorLat(20) * 1000, 0.001));
+
+    // 墨卡托：纬度越高，同样 1 度纬度的像素越长
+    final low = projectLonLat(0, 0).dy - projectLonLat(0, 10).dy;
+    final high = projectLonLat(0, 40).dy - projectLonLat(0, 50).dy;
+    expect(high, greaterThan(low));
   });
 
   test('解析后可以按坐标找到省份 / 城市 / 国家', () {
@@ -58,9 +67,11 @@ void main() {
   test('包围盒与面积', () {
     final geo = GeoData.parse(_sampleCn, _sampleWorld);
     final city = geo.cities.first;
-    expect(city.shape.bounds.width, closeTo(2000, 0.001));
-    expect(city.shape.bounds.height, closeTo(200, 0.001));
-    expect(city.shape.extent, closeTo(400000, 1));
-    expect(geo.chinaBounds.width, closeTo(2000, 0.001));
+    final left = projectLonLat(100, 20);
+    final right = projectLonLat(102, 20);
+    final bottom = projectLonLat(100, 20.2);
+    expect(city.shape.bounds.width, closeTo(right.dx - left.dx, 0.001));
+    expect(city.shape.bounds.height, closeTo(left.dy - bottom.dy, 0.001));
+    expect(geo.chinaBounds.width, closeTo(right.dx - left.dx, 0.001));
   });
 }

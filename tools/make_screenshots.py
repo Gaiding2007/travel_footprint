@@ -6,10 +6,10 @@ DST = r"C:\Users\14127\Desktop\travel_footprint\docs\screenshots"
 os.makedirs(DST, exist_ok=True)
 
 jobs = [
-    ("demo1.png", "home-cn.jpg"),
-    ("demo2.png", "picker.jpg"),
-    ("demo4.png", "home-world.jpg"),
-    ("export1.png", "export.jpg"),
+    ("v20m.png", "home-cn.jpg"),
+    ("v20r.png", "country-detail.jpg"),
+    ("v20t.png", "home-world.jpg"),
+    ("v20j.png", "picker.jpg"),
 ]
 
 for src, dst in jobs:

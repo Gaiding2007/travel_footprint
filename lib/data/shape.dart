@@ -1,13 +1,31 @@
+import 'dart:math' as math;
 import 'dart:ui';
 
-/// 地图坐标系（等距圆柱投影，和参考站 ECharts 的绘制方式一致）：
+/// 地图坐标系（Web 墨卡托投影，和手机地图上的形状一致）：
 ///   x = (经度 + 180) * [kUnitsPerDegree]
-///   y = (90 - 纬度) * [kUnitsPerDegree]
-/// 因此中国大致落在 x∈[253000, 315000]、y∈[36000, 87000] 的范围内。
+///   y = (90 - 墨卡托纬度) * [kUnitsPerDegree]
+///
+/// 用墨卡托是为了让"形状不变形"：等距圆柱投影下，中国地图会被横向拉宽约 25%。
+/// 高纬度（南极、北极圈外）墨卡托会趋于无穷，这里用线性方式接一段，保证有界。
 const double kUnitsPerDegree = 1000.0;
 
-Offset projectLonLat(double lon, double lat) =>
-    Offset((lon + 180.0) * kUnitsPerDegree, (90.0 - lat) * kUnitsPerDegree);
+const double _mercatorLatMin = -60.0;
+const double _mercatorLatMax = 84.0;
+const double _polarStretch = 0.6;
+
+/// 把纬度换成"墨卡托纬度"（单位仍是度）
+double mercatorLat(double lat) {
+  final clamped = lat.clamp(_mercatorLatMin, _mercatorLatMax).toDouble();
+  final rad = clamped * math.pi / 180.0;
+  final base = math.log(math.tan(math.pi / 4 + rad / 2)) * 180.0 / math.pi;
+  if (lat == clamped) return base;
+  return base + (lat - clamped) * _polarStretch;
+}
+
+Offset projectLonLat(double lon, double lat) => Offset(
+  (lon + 180.0) * kUnitsPerDegree,
+  (90.0 - mercatorLat(lat)) * kUnitsPerDegree,
+);
 
 /// 一块地图图形的几何：外环 + 洞（偶奇填充规则）。
 class Shape {
@@ -59,7 +77,7 @@ class Shape {
     return inside;
   }
 
-  /// 从数据文件里的一条记录构建，坐标是“经纬度 × 10000”的整数
+  /// 从数据文件里的一条记录构建，坐标是"经度/纬度 × 10000"的整数
   static Shape fromJson(Map<String, dynamic> json) {
     final rings = <List<Offset>>[];
     var minX = double.infinity;
@@ -70,10 +88,10 @@ class Shape {
     for (final rawRing in (json['r'] as List).cast<List<dynamic>>()) {
       final ring = <Offset>[];
       for (final rawPoint in rawRing.cast<List<dynamic>>()) {
-        final point = Offset(
-          (rawPoint[0] as num).toDouble() / 10.0 + 180000.0,
-          90000.0 - (rawPoint[1] as num).toDouble() / 10.0,
-        );
+        // 数据里存的是 经度*10000、纬度*10000
+        final lon = (rawPoint[0] as num).toDouble() / 10000.0;
+        final lat = (rawPoint[1] as num).toDouble() / 10000.0;
+        final point = projectLonLat(lon, lat);
         ring.add(point);
         if (point.dx < minX) minX = point.dx;
         if (point.dy < minY) minY = point.dy;
@@ -83,9 +101,9 @@ class Shape {
       if (ring.length >= 3) rings.add(ring);
     }
 
-    final anchor = Offset(
-      (json['x'] as num).toDouble() / 10.0 + 180000.0,
-      90000.0 - (json['y'] as num).toDouble() / 10.0,
+    final anchor = projectLonLat(
+      (json['x'] as num).toDouble() / 10000.0,
+      (json['y'] as num).toDouble() / 10000.0,
     );
 
     return Shape(

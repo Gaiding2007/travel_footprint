@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/geo_data.dart';
-import '../map/footprint_map.dart' show MapMode;
+import '../map/footprint_map.dart' show MapMode, shortRegionName;
 import '../state/footprint_store.dart';
 import '../theme.dart';
 
@@ -12,11 +12,19 @@ class SelectionSheet extends StatefulWidget {
     required this.geo,
     required this.store,
     required this.mode,
+    this.focusCountry,
+    this.onEnterCountry,
   });
 
   final GeoData geo;
   final FootprintStore store;
   final MapMode mode;
+
+  /// 国家特写时只列出这个国家的省/州
+  final Country? focusCountry;
+
+  /// 在世界列表里点"进入"时回调（进入该国的省州视图）
+  final ValueChanged<Country>? onEnterCountry;
 
   @override
   State<SelectionSheet> createState() => _SelectionSheetState();
@@ -28,8 +36,11 @@ class _SelectionSheetState extends State<SelectionSheet> {
   @override
   Widget build(BuildContext context) {
     final store = widget.store;
-    final isChina = widget.mode == MapMode.china;
+    final focus = widget.focusCountry;
+    final isChina = widget.mode == MapMode.china && focus == null;
     final height = MediaQuery.of(context).size.height * 0.86;
+    final hasSomethingLit =
+        store.litCityCount > 0 || store.litCountryCount > 0 || store.litRegionTotal > 0;
 
     return Container(
       height: height,
@@ -56,22 +67,26 @@ class _SelectionSheetState extends State<SelectionSheet> {
                 child: Row(
                   children: [
                     Text(
-                      isChina ? '选择城市' : '选择国家和地区',
+                      focus != null
+                          ? '选择省/州'
+                          : isChina
+                              ? '选择城市'
+                              : '选择国家和地区',
                       style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        isChina
-                            ? '已选 ${store.litCityCount} 市 · ${store.litProvinceCount} 省'
-                            : '已选 ${store.litCountryCount} 个',
+                        focus != null
+                            ? '${focus.name} · 已选 ${store.litRegionCount(focus.code)} / ${focus.regions.length}'
+                            : isChina
+                                ? '已选 ${store.litCityCount} 市 · ${store.litProvinceCount} 省'
+                                : '已选 ${store.litCountryCount} 个',
                         style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
                       ),
                     ),
                     TextButton(
-                      onPressed: store.litCityCount == 0 && store.litCountryCount == 0
-                          ? null
-                          : store.clearAll,
+                      onPressed: hasSomethingLit ? store.clearAll : null,
                       child: const Text('清空'),
                     ),
                   ],
@@ -98,7 +113,11 @@ class _SelectionSheetState extends State<SelectionSheet> {
               const SizedBox(height: 6),
               const Divider(height: 1, color: AppColors.divider),
               Expanded(
-                child: isChina ? _buildChinaList() : _buildWorldList(),
+                child: focus != null
+                    ? _buildRegionList(focus)
+                    : isChina
+                        ? _buildChinaList()
+                        : _buildWorldList(),
               ),
             ],
           );
@@ -219,6 +238,52 @@ class _SelectionSheetState extends State<SelectionSheet> {
     );
   }
 
+  Widget _buildRegionList(Country focus) {
+    final store = widget.store;
+    final visible = store.showSelectedOnly
+        ? focus.regions
+            .where((region) => store.isRegionLit(focus.code, region.index))
+            .toList(growable: false)
+        : focus.regions;
+
+    if (visible.isEmpty) {
+      return _EmptyHint(text: '${focus.name}还没有点亮的地方，回地图点一下试试');
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 28),
+      itemCount: visible.length,
+      itemBuilder: (context, index) {
+        final region = visible[index];
+        final lit = store.isRegionLit(focus.code, region.index);
+        return InkWell(
+          onTap: () => store.toggleRegion(focus.code, region.index),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 0, 14, 0),
+            child: Row(
+              children: [
+                Checkbox(
+                  value: lit,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  onChanged: (_) => store.toggleRegion(focus.code, region.index),
+                ),
+                Expanded(
+                  child: Text(
+                    shortRegionName(region.name),
+                    style: const TextStyle(fontSize: 14.5),
+                  ),
+                ),
+                if (lit)
+                  const Icon(Icons.check_rounded, size: 17, color: AppColors.primary),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildWorldList() {
     final store = widget.store;
     final all = [...widget.geo.countries]..sort((a, b) => a.name.compareTo(b.name));
@@ -254,10 +319,28 @@ class _SelectionSheetState extends State<SelectionSheet> {
                     style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
                   ),
                 ),
-                Text(
-                  country.code,
-                  style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
-                ),
+                if (store.countryStatus(country.code) == ProvinceStatus.partial)
+                  Text(
+                    '${store.litRegionCount(country.code)}/${country.regions.length}',
+                    style: const TextStyle(fontSize: 11, color: AppColors.primary),
+                  ),
+                if (country.hasRegions)
+                  InkWell(
+                    borderRadius: BorderRadius.circular(6),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      widget.onEnterCountry?.call(country);
+                    },
+                    child: const Padding(
+                      padding: EdgeInsets.all(6),
+                      child: Icon(Icons.chevron_right, size: 19),
+                    ),
+                  )
+                else
+                  Text(
+                    country.code,
+                    style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                  ),
               ],
             ),
           ),

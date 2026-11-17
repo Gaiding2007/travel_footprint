@@ -25,6 +25,9 @@ class _HomeScreenState extends State<HomeScreen> {
   final MapTransformController _controller = MapTransformController();
 
   MapMode _mode = MapMode.china;
+
+  /// 非空时处于"国家特写"，只显示这个国家的内部一级行政区
+  Country? _focusCountry;
   bool _exporting = false;
   String? _lastUri;
 
@@ -47,6 +50,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String get _counterText {
     final store = widget.store;
+    final focus = _focusCountry;
+    if (focus != null) {
+      return '已点亮 ${store.litRegionCount(focus.code)} 个省/州';
+    }
     if (_mode == MapMode.china) {
       return '已点亮 ${store.litProvinceCount} 省 ${store.litCityCount} 市';
     }
@@ -54,8 +61,20 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _switchMode(MapMode mode) {
-    if (_mode == mode) return;
-    setState(() => _mode = mode);
+    if (_mode == mode && _focusCountry == null) return;
+    setState(() {
+      _mode = mode;
+      _focusCountry = null;
+    });
+  }
+
+  void _enterCountry(Country country) {
+    setState(() => _focusCountry = country);
+    _toast('长按地图可以进入别的国家，点左上角返回');
+  }
+
+  void _leaveCountry() {
+    setState(() => _focusCountry = null);
   }
 
   void _zoomBy(double factor) {
@@ -82,7 +101,13 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => SelectionSheet(geo: widget.geo, store: widget.store, mode: _mode),
+      builder: (_) => SelectionSheet(
+        geo: widget.geo,
+        store: widget.store,
+        mode: _mode,
+        focusCountry: _focusCountry,
+        onEnterCountry: _enterCountry,
+      ),
     );
   }
 
@@ -195,15 +220,27 @@ class _HomeScreenState extends State<HomeScreen> {
   /// 地图下方的足迹概览卡片
   Widget _buildSummary() {
     final store = widget.store;
+    final focus = _focusCountry;
     final litProvinces = widget.geo.provinces
         .where((province) => store.provinceStatus(province.id) != ProvinceStatus.none)
         .toList(growable: false);
     final litCountries = widget.geo.countries
-        .where((country) => store.isCountryLit(country.code))
+        .where((country) => store.countryStatus(country.code) != ProvinceStatus.none)
         .toList(growable: false);
-    final chips = _mode == MapMode.china
-        ? litProvinces.map((province) => province.name).toList(growable: false)
-        : litCountries.map((country) => country.name).toList(growable: false);
+    final litRegions = focus == null
+        ? const <SubRegion>[]
+        : focus.regions
+            .where((region) => store.isRegionLit(focus.code, region.index))
+            .toList(growable: false);
+
+    final List<String> chips;
+    if (focus != null) {
+      chips = litRegions.map((region) => region.name).toList(growable: false);
+    } else if (_mode == MapMode.china) {
+      chips = litProvinces.map((province) => province.name).toList(growable: false);
+    } else {
+      chips = litCountries.map((country) => country.name).toList(growable: false);
+    }
     final empty = chips.isEmpty;
 
     return Container(
@@ -219,7 +256,10 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Row(
               children: [
-                _buildStat('省级', '${store.litProvinceCount}'),
+                _buildStat(
+                  focus != null ? '省/州' : '省级',
+                  '${focus != null ? store.litRegionCount(focus.code) : store.litProvinceCount}',
+                ),
                 _buildStatDivider(),
                 _buildStat('城市', '${store.litCityCount}'),
                 _buildStatDivider(),
@@ -227,7 +267,15 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
             const SizedBox(height: 14),
-            if (_mode == MapMode.china) ...[
+            if (focus != null) ...[
+              _buildProgress(
+                '${focus.name}的省/州进度',
+                store.litRegionCount(focus.code),
+                focus.regions.length,
+              ),
+              const SizedBox(height: 10),
+              _buildProgress('地级市的进度', store.litCityCount, widget.geo.cities.length),
+            ] else if (_mode == MapMode.china) ...[
               _buildProgress('省级行政区的进度', store.litProvinceCount, widget.geo.provinces.length),
               const SizedBox(height: 10),
               _buildProgress('地级市的进度', store.litCityCount, widget.geo.cities.length),
@@ -236,14 +284,20 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 14),
             if (empty)
               Text(
-                _mode == MapMode.china
-                    ? '点一下地图上的省份就能点亮，双指放大后可以点单个城市。'
-                    : '点一下地图上的国家和地区就能点亮，双指可以缩放和拖动。',
+                focus != null
+                    ? '点一下${focus.name}地图上的省/州就能点亮，左上角可以返回世界地图。'
+                    : _mode == MapMode.china
+                        ? '点一下地图上的省份就能点亮，双指放大后可以点单个城市。'
+                        : '点一下地图上的国家和地区就能点亮，长按国家可以看它的省/州。',
                 style: const TextStyle(fontSize: 12, height: 1.5, color: AppColors.textSecondary),
               )
             else ...[
               Text(
-                _mode == MapMode.china ? '已点亮的省级行政区' : '已点亮的国家和地区',
+                focus != null
+                    ? '已点亮的省/州'
+                    : _mode == MapMode.china
+                        ? '已点亮的省级行政区'
+                        : '已点亮的国家和地区',
                 style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
               ),
               const SizedBox(height: 8),
@@ -326,27 +380,41 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildHeader() {
+    final focus = _focusCountry;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 6, 8),
       child: Row(
         children: [
+          if (focus != null) ...[
+            GestureDetector(
+              onTap: _leaveCountry,
+              child: const Padding(
+                padding: EdgeInsets.only(right: 6, top: 2, bottom: 2),
+                child: Icon(Icons.arrow_back_ios_new_rounded, size: 18),
+              ),
+            ),
+          ],
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                kAppName,
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: 0.5),
+              Text(
+                focus?.name ?? kAppName,
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: 0.5),
               ),
               const SizedBox(height: 2),
               Text(
-                _mode == MapMode.china ? '记录走过的地方' : '记录去过的国家',
+                focus != null
+                    ? '点一下省/州就能点亮'
+                    : _mode == MapMode.china
+                        ? '记录走过的地方'
+                        : '记录去过的国家',
                 style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
               ),
             ],
           ),
           const Spacer(),
-          _buildModeTabs(),
+          if (focus == null) _buildModeTabs(),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_horiz, size: 22),
             onSelected: (value) {
@@ -426,6 +494,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           store: widget.store,
                           controller: _controller,
                           mode: _mode,
+                          focusCountry: _focusCountry,
+                          onCountryLongPress: _enterCountry,
                         ),
                       ),
                       Positioned(left: 12, top: 12, child: _buildCounter()),
@@ -512,7 +582,13 @@ class _HomeScreenState extends State<HomeScreen> {
               child: FilledButton.icon(
                 onPressed: _openSelection,
                 icon: const Icon(Icons.checklist_rounded, size: 19),
-                label: Text(_mode == MapMode.china ? '选择城市' : '选择国家'),
+                label: Text(
+                  _focusCountry != null
+                      ? '选择省/州'
+                      : _mode == MapMode.china
+                          ? '选择城市'
+                          : '选择国家',
+                ),
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

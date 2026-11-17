@@ -9,6 +9,7 @@ import 'map_transform_controller.dart';
 enum MapMode { china, world }
 
 const Color kLitFill = Color(0xFF90CEFF);
+const Color kPartialFill = Color(0xFFD8EBFF);
 const Color kLitBorder = Color(0xFF5A5A5A);
 const Color kUnlitBorder = Color(0xFFBFBFBF);
 const Color kProvinceBorder = Color(0xFF333333);
@@ -17,11 +18,28 @@ const Color kLabelColor = Color(0xFF3D3D3D);
 /// 面积小但重要的行政区，低倍率下也要显示名称
 const Set<String> kAlwaysLabeled = {'北京', '上海', '天津', '重庆', '香港', '澳门'};
 
+/// 把"新疆维吾尔自治区"这类长名字缩成地图上更顺眼的短名字
+String shortRegionName(String name) {
+  const suffixes = <String>[
+    '维吾尔自治区',
+    '壮族自治区',
+    '回族自治区',
+    '特别行政区',
+    '自治区',
+  ];
+  for (final suffix in suffixes) {
+    if (name.endsWith(suffix)) {
+      return name.substring(0, name.length - suffix.length);
+    }
+  }
+  return name;
+}
+
 /// 中国地图的默认取景范围（略去南海深处，避免大片空白海面）
 Rect chinaViewBounds() =>
     Rect.fromPoints(projectLonLat(72.5, 54.8), projectLonLat(136.0, 15.5));
 
-/// 达到该倍率即进入"市级"交互与标注层级
+/// 达到该倍率即进入"市级"交互层级（点城市而不是整省）
 const double kCityLevelFactor = 2.2;
 
 class FootprintMap extends StatefulWidget {
@@ -31,12 +49,20 @@ class FootprintMap extends StatefulWidget {
     required this.store,
     required this.controller,
     required this.mode,
+    this.focusCountry,
+    this.onCountryLongPress,
   });
 
   final GeoData geo;
   final FootprintStore store;
   final MapTransformController controller;
   final MapMode mode;
+
+  /// 非空时进入"国家特写"：只画这个国家的内部一级行政区
+  final Country? focusCountry;
+
+  /// 长按某个国家（用于进入国家特写）
+  final ValueChanged<Country>? onCountryLongPress;
 
   @override
   State<FootprintMap> createState() => _FootprintMapState();
@@ -47,9 +73,9 @@ class _FootprintMapState extends State<FootprintMap> {
 
   Path _allPath = Path();
   Path _litPath = Path();
+  Path _partialPath = Path();
   Path _outlinePath = Path();
-  List<_Label> _provinceLabels = const <_Label>[];
-  List<_Label> _cityLabels = const <_Label>[];
+  List<_Label> _labels = const <_Label>[];
 
   double _gestureStartScale = 1;
 
@@ -67,7 +93,9 @@ class _FootprintMapState extends State<FootprintMap> {
       oldWidget.store.removeListener(_onDataChanged);
       widget.store.addListener(_onDataChanged);
     }
-    if (oldWidget.mode != widget.mode || oldWidget.store != widget.store) {
+    if (oldWidget.mode != widget.mode ||
+        oldWidget.store != widget.store ||
+        oldWidget.focusCountry?.code != widget.focusCountry?.code) {
       _rebuild();
     }
   }
@@ -86,17 +114,38 @@ class _FootprintMapState extends State<FootprintMap> {
   void _rebuild() {
     final all = Path();
     final lit = Path();
+    final partial = Path();
     final outline = Path();
-    final provinceLabels = <_Label>[];
+    final labels = <_Label>[];
 
-    if (widget.mode == MapMode.china) {
+    final focus = widget.focusCountry;
+    if (focus != null) {
+      final wholeLit = widget.store.isWholeCountryLit(focus.code);
+      for (final region in focus.regions) {
+        all.addPath(region.shape.path, Offset.zero);
+        final regionLit = wholeLit || widget.store.isRegionLit(focus.code, region.index);
+        if (regionLit) lit.addPath(region.shape.path, Offset.zero);
+        labels.add(
+          _Label(
+            text: shortRegionName(region.name),
+            anchor: region.shape.anchor,
+            area: region.shape.extent,
+            always: false,
+          ),
+        );
+      }
+      outline.addPath(focus.shape.path, Offset.zero);
+    } else if (widget.mode == MapMode.china) {
       for (final city in widget.geo.cities) {
         all.addPath(city.shape.path, Offset.zero);
         if (widget.store.isCityLit(city.id)) lit.addPath(city.shape.path, Offset.zero);
       }
       for (final province in widget.geo.provinces) {
         outline.addPath(province.shape.path, Offset.zero);
-        provinceLabels.add(
+        if (widget.store.provinceStatus(province.id) == ProvinceStatus.partial) {
+          partial.addPath(province.shape.path, Offset.zero);
+        }
+        labels.add(
           _Label(
             text: province.name,
             anchor: province.shape.anchor,
@@ -108,8 +157,15 @@ class _FootprintMapState extends State<FootprintMap> {
     } else {
       for (final country in widget.geo.countries) {
         all.addPath(country.shape.path, Offset.zero);
-        if (widget.store.isCountryLit(country.code)) lit.addPath(country.shape.path, Offset.zero);
-        provinceLabels.add(
+        switch (widget.store.countryStatus(country.code)) {
+          case ProvinceStatus.lit:
+            lit.addPath(country.shape.path, Offset.zero);
+          case ProvinceStatus.partial:
+            partial.addPath(country.shape.path, Offset.zero);
+          case ProvinceStatus.none:
+            break;
+        }
+        labels.add(
           _Label(
             text: country.name,
             anchor: country.shape.anchor,
@@ -120,30 +176,37 @@ class _FootprintMapState extends State<FootprintMap> {
       }
     }
 
-    provinceLabels.sort((a, b) {
+    labels.sort((a, b) {
       if (a.always != b.always) return a.always ? -1 : 1;
       return b.area.compareTo(a.area);
     });
 
     _allPath = all;
     _litPath = lit;
+    _partialPath = partial;
     _outlinePath = outline;
-    _provinceLabels = provinceLabels;
-    if (widget.mode == MapMode.china && _cityLabels.isEmpty) {
-      _cityLabels = [
-        for (final city in widget.geo.cities)
-          _Label(text: city.name, anchor: city.shape.anchor, area: city.shape.extent, always: false),
-      ]..sort((a, b) => b.area.compareTo(a.area));
-    }
+    _labels = labels;
   }
 
-  Rect get _contentBounds =>
-      widget.mode == MapMode.china ? chinaViewBounds() : widget.geo.worldBounds;
+  Rect get _contentBounds {
+    final focus = widget.focusCountry;
+    if (focus != null) {
+      return focus.shape.bounds.inflate(focus.shape.bounds.longestSide * 0.06);
+    }
+    return widget.mode == MapMode.china ? chinaViewBounds() : widget.geo.worldBounds;
+  }
 
   void _handleTap(Offset localPosition) {
     final controller = widget.controller;
     if (!controller.isReady) return;
     final point = controller.screenToMap(localPosition);
+
+    final focus = widget.focusCountry;
+    if (focus != null) {
+      final region = widget.geo.subRegionAt(focus, point);
+      if (region != null) widget.store.toggleRegion(focus.code, region.index);
+      return;
+    }
     if (widget.mode == MapMode.world) {
       final country = widget.geo.countryAt(point);
       if (country != null) widget.store.toggleCountry(country.code);
@@ -161,8 +224,15 @@ class _FootprintMapState extends State<FootprintMap> {
   }
 
   void _handleLongPress(Offset localPosition) {
+    final controller = widget.controller;
+    if (!controller.isReady) return;
+    final point = controller.screenToMap(localPosition);
+    if (widget.focusCountry == null && widget.mode == MapMode.world) {
+      final country = widget.geo.countryAt(point);
+      if (country != null) widget.onCountryLongPress?.call(country);
+      return;
+    }
     if (widget.mode != MapMode.china) return;
-    final point = widget.controller.screenToMap(localPosition);
     final city = widget.geo.cityAt(point);
     if (city != null) widget.store.toggleCity(city.id);
   }
@@ -175,9 +245,6 @@ class _FootprintMapState extends State<FootprintMap> {
         widget.controller.attach(viewport: size, content: _contentBounds, notify: false);
         final cityLevel = widget.controller.isReady &&
             widget.controller.scale >= widget.controller.fitScale * kCityLevelFactor;
-        final labels = widget.mode == MapMode.world
-            ? _provinceLabels
-            : (cityLevel ? _cityLabels : _provinceLabels);
 
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -205,9 +272,11 @@ class _FootprintMapState extends State<FootprintMap> {
                     controller: widget.controller,
                     allPath: _allPath,
                     litPath: _litPath,
+                    partialPath: _partialPath,
                     outlinePath: _outlinePath,
-                    labels: labels,
+                    labels: _labels,
                     mode: widget.mode,
+                    focus: widget.focusCountry != null,
                     showLabels: widget.store.showLabels,
                     cityLevel: cityLevel,
                     textCache: _textCache,
@@ -241,9 +310,11 @@ class _FootprintPainter extends CustomPainter {
     required this.controller,
     required this.allPath,
     required this.litPath,
+    required this.partialPath,
     required this.outlinePath,
     required this.labels,
     required this.mode,
+    required this.focus,
     required this.showLabels,
     required this.cityLevel,
     required this.textCache,
@@ -252,9 +323,11 @@ class _FootprintPainter extends CustomPainter {
   final MapTransformController controller;
   final Path allPath;
   final Path litPath;
+  final Path partialPath;
   final Path outlinePath;
   final List<_Label> labels;
   final MapMode mode;
+  final bool focus;
   final bool showLabels;
   final bool cityLevel;
   final Map<String, TextPainter> textCache;
@@ -270,34 +343,52 @@ class _FootprintPainter extends CustomPainter {
     canvas.scale(scale);
 
     canvas.drawPath(allPath, Paint()..color = Colors.white);
+    canvas.drawPath(partialPath, Paint()..color = kPartialFill);
     canvas.drawPath(litPath, Paint()..color = kLitFill);
 
-    // 市级边界在任何倍率下都画，低倍率时更淡，保证像一张完整的地图
-    canvas.drawPath(
-      allPath,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = (cityLevel ? 0.55 : 0.42) / scale
-        ..color = cityLevel ? kUnlitBorder : const Color(0xFFC3CBD5),
-    );
-    if (scale >= controller.fitScale * 1.6) {
+    if (focus) {
+      // 国家特写：省/州边界更清楚一些
       canvas.drawPath(
-        litPath,
+        allPath,
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 0.75 / scale
-          ..color = kLitBorder,
+          ..strokeWidth = 0.7 / scale
+          ..color = const Color(0xFF9AA7B6),
       );
-    }
-
-    if (mode == MapMode.china) {
       canvas.drawPath(
         outlinePath,
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.0 / scale
+          ..strokeWidth = 1.3 / scale
           ..color = kProvinceBorder,
       );
+    } else {
+      // 国内 / 世界：低倍率下边界更淡，保证像一张完整的地图
+      canvas.drawPath(
+        allPath,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = (cityLevel ? 0.55 : 0.42) / scale
+          ..color = cityLevel ? kUnlitBorder : const Color(0xFFC3CBD5),
+      );
+      if (scale >= controller.fitScale * 1.6) {
+        canvas.drawPath(
+          litPath,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 0.75 / scale
+            ..color = kLitBorder,
+        );
+      }
+      if (mode == MapMode.china) {
+        canvas.drawPath(
+          outlinePath,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.0 / scale
+            ..color = kProvinceBorder,
+        );
+      }
     }
 
     canvas.restore();
@@ -307,7 +398,14 @@ class _FootprintPainter extends CustomPainter {
 
   void _paintLabels(Canvas canvas, Size size) {
     final scale = controller.scale;
-    final minArea = mode == MapMode.china ? (cityLevel ? 45.0 : 110.0) : 240.0;
+    final double minArea;
+    if (focus) {
+      minArea = 30;
+    } else if (mode == MapMode.china) {
+      minArea = 110;
+    } else {
+      minArea = 240;
+    }
     final occupied = <Rect>[];
 
     for (final label in labels) {
@@ -321,7 +419,7 @@ class _FootprintPainter extends CustomPainter {
       final screenArea = label.area * scale * scale;
       if (screenArea < minArea && !label.always) continue;
 
-      final painter = _painterFor(label.text, cityLevel);
+      final painter = _painterFor(label.text, focus);
       final rect = Rect.fromCenter(
         center: anchor,
         width: painter.width + 5,
@@ -336,8 +434,8 @@ class _FootprintPainter extends CustomPainter {
     }
   }
 
-  TextPainter _painterFor(String text, bool big) {
-    final key = '$text|${big ? 1 : 0}';
+  TextPainter _painterFor(String text, bool small) {
+    final key = '$text|${small ? 1 : 0}';
     final cached = textCache[key];
     if (cached != null) return cached;
     final painter = TextPainter(
@@ -345,10 +443,10 @@ class _FootprintPainter extends CustomPainter {
       text: TextSpan(
         text: text,
         style: TextStyle(
-          fontSize: big ? 10.5 : 11,
+          fontSize: small ? 10 : 11,
           height: 1.05,
           color: kLabelColor,
-          fontWeight: big ? FontWeight.w500 : FontWeight.w600,
+          fontWeight: small ? FontWeight.w500 : FontWeight.w600,
           shadows: const [Shadow(color: Colors.white, blurRadius: 2.5)],
         ),
       ),
@@ -364,8 +462,10 @@ class _FootprintPainter extends CustomPainter {
         oldDelegate.controller.offset != controller.offset ||
         oldDelegate.allPath != allPath ||
         oldDelegate.litPath != litPath ||
+        oldDelegate.partialPath != partialPath ||
         oldDelegate.showLabels != showLabels ||
         oldDelegate.cityLevel != cityLevel ||
+        oldDelegate.focus != focus ||
         oldDelegate.mode != mode;
   }
 }

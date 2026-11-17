@@ -3,15 +3,15 @@
 把去过的地方在地图上点亮，随时看"我去过哪些地方"，还能把这张地图存成图片分享出去。
 
 > 参考产品：[zuji.subsfast.com](https://zuji.subsfast.com)；本项目是独立的安卓 App（Flutter），地图数据离线内嵌，**不需要联网**。
-> 版本：**0.1.0**（全新重构版） · 改动记录见 [log.md](log.md) · 旧版开发日记见 [docs/旧版开发日记.md](docs/旧版开发日记.md)
+> 版本：**0.2.0**（全新重构版） · 改动记录见 [log.md](log.md) · 旧版开发日记见 [docs/旧版开发日记.md](docs/旧版开发日记.md)
 
-| 国内足迹 | 选择城市 | 全球足迹 |
+| 国内足迹 | 国家特写 | 全球足迹 | 选择面板 |
 | --- | --- | --- |
-| ![国内](docs/screenshots/home-cn.jpg) | ![选择城市](docs/screenshots/picker.jpg) | ![全球](docs/screenshots/home-world.jpg) |
+| ![国内](docs/screenshots/home-cn.jpg) | ![国家特写](docs/screenshots/country-detail.jpg) | ![全球](docs/screenshots/home-world.jpg) | ![选择面板](docs/screenshots/picker.jpg) |
 
 ## 功能
 
-- **省市两级中国地图**：34 个省级行政区 + 372 个地级行政区，白色底图、省界深、市界浅。
+- **省市两级中国地图**：34 个省级行政区 + 392 个地级行政区（含台湾 21 个县市），白色底图、省界深、市界浅。
 - **点一下就点亮**：点省份 = 整省点亮/取消；放大后（双指或右下角 +）点城市 = 单个城市点亮/取消。
 - **全球足迹**：236 个国家和地区，同样点击点亮，标注会自动避让，不会糊成一团。
 - **实时计数**：`已点亮 N 省 M 市` / `已点亮 N 个国家和地区`，概览卡里还有总体进度条。
@@ -42,7 +42,7 @@ flutter build apk --release        # 产物：build/app/outputs/flutter-apk/app-
 
 开发调试：`flutter run -d <device-id>`；检查：`flutter analyze`、`flutter test`。
 
-> 0.1.0 的发布包使用 debug 签名，正式发布前需要先生成自己的 keystore。
+> 0.1.0 / 0.2.0 的发布包使用 debug 签名，正式发布前需要先生成自己的 keystore。
 
 ## 目录
 
