@@ -171,6 +171,14 @@ docs/screenshots/                 README 截图
 | 重启恢复 | 杀进程重进，仍为 `1 省 11 市` |
 | `flutter analyze` | No issues found |
 | `flutter test` | 3 个用例全部通过 |
+| release 包 | `app-release.apk`（44.2 MB）安装后正常启动、地图与标注正确 |
+
+#### 打包与发布
+
+- 应用图标：`tools/make_icon.py` 生成 5 档 `mipmap-*/ic_launcher.png`（蓝底渐变 + 白色定位针），替换 Flutter 默认图标。
+- 发布包：`flutter build apk --release` → `build/app/outputs/flutter-apk/app-release.apk`，44.2 MB，包含
+  arm64-v8a / armeabi-v7a / x86_64 三个 ABI（想变小可以加 `--split-per-abi`）。目前用 debug 签名。
+- 代码已推送到 GitHub `main`：提交 `feat: 重构为 0.1.0 全新地图版`，并打上标签 `v0.1.0`。
 
 #### 已知问题 / 下一版计划
 
