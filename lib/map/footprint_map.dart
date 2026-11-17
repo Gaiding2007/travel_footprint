@@ -191,9 +191,53 @@ class _FootprintMapState extends State<FootprintMap> {
   Rect get _contentBounds {
     final focus = widget.focusCountry;
     if (focus != null) {
-      return focus.shape.bounds.inflate(focus.shape.bounds.longestSide * 0.06);
+      final bounds = _coreBounds(focus);
+      return bounds.inflate(bounds.longestSide * 0.06);
     }
     return widget.mode == MapMode.china ? chinaViewBounds() : widget.geo.worldBounds;
+  }
+
+  /// 国家的取景范围只算"主体部分"。
+  ///
+  /// 像俄罗斯这种跨 180° 经线的国家，把所有省州的包围盒合起来会得到横跨整个地球的宽度，
+  /// 结果地图被缩成一小团。这里以面积最大的省州为中心开一个 ±100° 经度的窗口，
+  /// **按坐标点**筛：窗口外的点（楚科奇东端那一小截）不参与取景，但它们依然能点、依然会画出来。
+  Rect _coreBounds(Country country) {
+    final regions = country.regions;
+    if (regions.isEmpty) return country.shape.bounds;
+
+    var anchorRegion = regions.first;
+    for (final region in regions) {
+      if (region.shape.extent > anchorRegion.shape.extent) anchorRegion = region;
+    }
+    final anchorX = anchorRegion.shape.anchor.dx;
+    const maxGap = 130 * kUnitsPerDegree;
+    final windowLeft = anchorX - maxGap;
+    final windowRight = anchorX + maxGap;
+
+    double? minX;
+    double? minY;
+    double? maxX;
+    double? maxY;
+    for (final region in regions) {
+      final bounds = region.shape.bounds;
+      if (bounds.right < windowLeft || bounds.left > windowRight) continue;
+      for (final ring in region.shape.rings) {
+        for (final point in ring) {
+          final x = point.dx;
+          if (x < windowLeft || x > windowRight) continue;
+          final y = point.dy;
+          if (minX == null || x < minX) minX = x;
+          if (maxX == null || x > maxX) maxX = x;
+          if (minY == null || y < minY) minY = y;
+          if (maxY == null || y > maxY) maxY = y;
+        }
+      }
+    }
+    if (minX == null || minY == null || maxX == null || maxY == null) {
+      return country.shape.bounds;
+    }
+    return Rect.fromLTRB(minX, minY, maxX, maxY);
   }
 
   void _handleTap(Offset localPosition) {
@@ -400,7 +444,7 @@ class _FootprintPainter extends CustomPainter {
     final scale = controller.scale;
     final double minArea;
     if (focus) {
-      minArea = 30;
+      minArea = 55;
     } else if (mode == MapMode.china) {
       minArea = 110;
     } else {
@@ -425,6 +469,13 @@ class _FootprintPainter extends CustomPainter {
         width: painter.width + 5,
         height: painter.height + 2,
       );
+      // 边缘不画半个地名：完整文字必须落在卡片里
+      if (rect.left < 2 ||
+          rect.top < 2 ||
+          rect.right > size.width - 2 ||
+          rect.bottom > size.height - 2) {
+        continue;
+      }
       if (occupied.any((other) => other.overlaps(rect.deflate(1)))) continue;
       occupied.add(rect);
       painter.paint(

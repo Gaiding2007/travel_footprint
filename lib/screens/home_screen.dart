@@ -69,6 +69,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _enterCountry(Country country) {
+    // 中国有专门的"国内"模式（省 + 市两级，数据更细），不重复做国家特写
+    if (country.code == 'CHN') {
+      setState(() {
+        _mode = MapMode.china;
+        _focusCountry = null;
+      });
+      _toast('中国已切到「国内」，可以看到省市两级');
+      return;
+    }
     setState(() => _focusCountry = country);
     _toast('长按地图可以进入别的国家，点左上角返回');
   }
