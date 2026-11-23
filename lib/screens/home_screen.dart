@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../app_info.dart';
@@ -7,6 +9,7 @@ import '../map/map_transform_controller.dart';
 import '../services/export_service.dart';
 import '../state/footprint_store.dart';
 import '../theme.dart';
+import '../widgets/export_preview_dialog.dart';
 import '../widgets/selection_sheet.dart';
 
 /// 主界面：地图 + 计数 + 选择面板 + 存图
@@ -28,8 +31,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// 非空时处于"国家特写"，只显示这个国家的内部一级行政区
   Country? _focusCountry;
+
+  /// 世界地图上点了一下、等待第二下进入的国家（只高亮，不点亮）
+  Country? _selectedCountry;
   bool _exporting = false;
-  String? _lastUri;
 
   @override
   void initState() {
@@ -65,10 +70,23 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _mode = mode;
       _focusCountry = null;
+      _selectedCountry = null;
     });
   }
 
+  /// 世界地图上第一次点到某个国家：只高亮 + 提示，不点亮
+  void _selectCountry(Country country) {
+    setState(() => _selectedCountry = country);
+    _toast('再点一下进入「${country.name}」，看它的省/州');
+  }
+
+  void _clearSelection() {
+    if (_selectedCountry == null) return;
+    setState(() => _selectedCountry = null);
+  }
+
   void _enterCountry(Country country) {
+    setState(() => _selectedCountry = null);
     // 中国有专门的"国内"模式（省 + 市两级，数据更细），不重复做国家特写
     if (country.code == 'CHN') {
       setState(() {
@@ -78,12 +96,20 @@ class _HomeScreenState extends State<HomeScreen> {
       _toast('中国已切到「国内」，可以看到省市两级');
       return;
     }
+    if (!country.hasRegions) {
+      widget.store.toggleCountry(country.code);
+      _toast('${country.name} 没有下级省州数据，直接切换点亮');
+      return;
+    }
     setState(() => _focusCountry = country);
-    _toast('长按地图可以进入别的国家，点左上角返回');
+    _toast('点一下省/州就能点亮，点左上角返回');
   }
 
   void _leaveCountry() {
-    setState(() => _focusCountry = null);
+    setState(() {
+      _focusCountry = null;
+      _selectedCountry = null;
+    });
   }
 
   void _zoomBy(double factor) {
@@ -123,16 +149,36 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _export({required bool share}) async {
     if (_exporting) return;
     setState(() => _exporting = true);
+    Uint8List? png;
     try {
-      final uri = await ExportService.saveToGallery(_shotKey);
-      if (uri != null) _lastUri = uri;
+      png = await ExportService.capturePng(_shotKey);
+    } catch (error) {
+      if (mounted) _toast('生成图片失败：$error');
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+    if (!mounted) return;
+    if (png == null) {
+      _toast('没有可以保存的画面');
+      return;
+    }
+
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (_) => ExportPreviewDialog(png: png!, preferShare: share),
+    );
+    if (!mounted || choice == null || choice == 'cancel') return;
+
+    setState(() => _exporting = true);
+    try {
+      final uri = await ExportService.saveBytes(png);
       if (!mounted) return;
-      if (uri == null && _lastUri == null) {
-        _toast('保存失败：没有可保存的画面');
-      } else {
-        _toast('已保存到相册');
+      if (uri == null) {
+        _toast('保存失败：系统没有接受这张图片');
+        return;
       }
-      if (share) await ExportService.share(_lastUri);
+      _toast('已保存到相册');
+      if (choice == 'share') await ExportService.share(uri);
     } catch (error) {
       if (!mounted) return;
       _toast('保存失败：$error');
@@ -171,8 +217,8 @@ class _HomeScreenState extends State<HomeScreen> {
             const Text('版本 $kAppVersion'),
             const SizedBox(height: 10),
             const Text(
-              '在地图上点一下省份即可点亮（放大后可以点单个城市），'
-              '切到"全球"可以点亮去过的国家和地区。',
+              '国内：点省份就点亮这个省（不会连带点亮所有城市），放大后可以点单个城市。\n'
+              '全球：点一下国家先高亮，再点一下进去看它的省/州；没有省州数据的国家一点即切换。',
               style: TextStyle(fontSize: 13, height: 1.5),
             ),
             const SizedBox(height: 10),
@@ -226,15 +272,20 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// 地图下方的足迹概览卡片
+  /// 地图下方的足迹概览卡片。
+  ///
+  /// 国内 / 全球 / 国家特写三种情况各显示自己的统计口径，
+  /// 不会在"全球"页面里还摆着国内的地级市进度（需求 7）。
   Widget _buildSummary() {
     final store = widget.store;
     final focus = _focusCountry;
+    final isChina = _mode == MapMode.china && focus == null;
+
     final litProvinces = widget.geo.provinces
-        .where((province) => store.provinceStatus(province.id) != ProvinceStatus.none)
+        .where((province) => store.provinceVisited(province.id))
         .toList(growable: false);
     final litCountries = widget.geo.countries
-        .where((country) => store.countryStatus(country.code) != ProvinceStatus.none)
+        .where((country) => store.isCountryLit(country.code))
         .toList(growable: false);
     final litRegions = focus == null
         ? const <SubRegion>[]
@@ -242,15 +293,37 @@ class _HomeScreenState extends State<HomeScreen> {
             .where((region) => store.isRegionLit(focus.code, region.index))
             .toList(growable: false);
 
+    final List<(String, String)> stats;
+    if (focus != null) {
+      stats = [
+        ('省/州', '${store.litRegionCount(focus.code)}'),
+        ('国家地区', '${store.litCountryCount}'),
+      ];
+    } else if (isChina) {
+      stats = [
+        ('省级', '${store.litProvinceCount}'),
+        ('城市', '${store.litCityCount}'),
+        ('国家地区', '${store.litCountryCount}'),
+      ];
+    } else {
+      stats = [
+        ('国家地区', '${store.litCountryCount}'),
+        ('点亮的省/州', '${store.litRegionTotal}'),
+      ];
+    }
+
     final List<String> chips;
+    final String chipTitle;
     if (focus != null) {
       chips = litRegions.map((region) => region.name).toList(growable: false);
-    } else if (_mode == MapMode.china) {
+      chipTitle = '已点亮的省/州';
+    } else if (isChina) {
       chips = litProvinces.map((province) => province.name).toList(growable: false);
+      chipTitle = '已点亮的省级行政区';
     } else {
       chips = litCountries.map((country) => country.name).toList(growable: false);
+      chipTitle = '已点亮的国家和地区';
     }
-    final empty = chips.isEmpty;
 
     return Container(
       width: double.infinity,
@@ -265,48 +338,38 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Row(
               children: [
-                _buildStat(
-                  focus != null ? '省/州' : '省级',
-                  '${focus != null ? store.litRegionCount(focus.code) : store.litProvinceCount}',
-                ),
-                _buildStatDivider(),
-                _buildStat('城市', '${store.litCityCount}'),
-                _buildStatDivider(),
-                _buildStat('国家地区', '${store.litCountryCount}'),
+                for (var index = 0; index < stats.length; index++) ...[
+                  if (index > 0) _buildStatDivider(),
+                  _buildStat(stats[index].$1, stats[index].$2),
+                ],
               ],
             ),
             const SizedBox(height: 14),
-            if (focus != null) ...[
-              _buildProgress(
-                '${focus.name}的省/州进度',
-                store.litRegionCount(focus.code),
-                focus.regions.length,
-              ),
-              const SizedBox(height: 10),
-              _buildProgress('地级市的进度', store.litCityCount, widget.geo.cities.length),
-            ] else if (_mode == MapMode.china) ...[
+            if (focus != null)
+              _buildProgress('${focus.name}的省/州进度', store.litRegionCount(focus.code), focus.regions.length)
+            else if (isChina) ...[
               _buildProgress('省级行政区的进度', store.litProvinceCount, widget.geo.provinces.length),
               const SizedBox(height: 10),
               _buildProgress('地级市的进度', store.litCityCount, widget.geo.cities.length),
             ] else
               _buildProgress('国家和地区的进度', store.litCountryCount, widget.geo.countries.length),
+            if (focus == null) ...[
+              const SizedBox(height: 12),
+              _buildDetailToggle(),
+            ],
             const SizedBox(height: 14),
-            if (empty)
+            if (chips.isEmpty)
               Text(
                 focus != null
-                    ? '点一下${focus.name}地图上的省/州就能点亮，左上角可以返回世界地图。'
-                    : _mode == MapMode.china
-                        ? '点一下地图上的省份就能点亮，双指放大后可以点单个城市。'
-                        : '点一下地图上的国家和地区就能点亮，长按国家可以看它的省/州。',
+                    ? '点一下${focus.name}地图上的省/州就能点亮，点左上角可以返回世界地图。'
+                    : isChina
+                        ? '点一下地图上的省份就能点亮；放大后可以点单个城市。'
+                        : '先点一下地图上的国家高亮它，再点一下进入它的省/州；没有省州数据的国家一点即切换。',
                 style: const TextStyle(fontSize: 12, height: 1.5, color: AppColors.textSecondary),
               )
             else ...[
               Text(
-                focus != null
-                    ? '已点亮的省/州'
-                    : _mode == MapMode.china
-                        ? '已点亮的省级行政区'
-                        : '已点亮的国家和地区',
+                chipTitle,
                 style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
               ),
               const SizedBox(height: 8),
@@ -330,6 +393,62 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+
+  /// 粗略 / 详细 显示开关（需求 9）
+  Widget _buildDetailToggle() {
+    final detailed = widget.store.detailDisplay;
+    return Row(
+      children: [
+        const Text('地图显示', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(2),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEFF3F9),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                _buildDetailOption('粗略', !detailed, () => widget.store.setDetailDisplay(false)),
+                _buildDetailOption('详细', detailed, () => widget.store.setDetailDisplay(true)),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDetailOption(String label, bool selected, VoidCallback onTap) {
+    return Expanded(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          height: 30,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            boxShadow: selected
+                ? const [BoxShadow(color: Color(0x12000000), blurRadius: 2, offset: Offset(0, 1))]
+                : null,
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+              color: selected ? AppColors.textPrimary : AppColors.textSecondary,
+            ),
+          ),
         ),
       ),
     );
@@ -504,10 +623,16 @@ class _HomeScreenState extends State<HomeScreen> {
                           controller: _controller,
                           mode: _mode,
                           focusCountry: _focusCountry,
+                          selectedCountryCode: _selectedCountry?.code,
+                          onCountryTap: _selectCountry,
+                          onEnterCountry: _enterCountry,
                           onCountryLongPress: _enterCountry,
+                          onBackgroundTap: _clearSelection,
                         ),
                       ),
                       Positioned(left: 12, top: 12, child: _buildCounter()),
+                      if (_selectedCountry != null)
+                        Positioned(right: 10, top: 10, child: _buildSelectionHint()),
                       const Positioned(
                         left: 12,
                         bottom: 10,
@@ -547,6 +672,39 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Text(
         _counterText,
         style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+
+  /// 选中国家后的小提示条：再点一下进去
+  Widget _buildSelectionHint() {
+    final country = _selectedCountry!;
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 190),
+      padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: const Color(0xF2FFFFFF),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFF2E6BE6)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              '再点一下进入「${country.name}」',
+              style: const TextStyle(fontSize: 11, color: Color(0xFF2E6BE6)),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          GestureDetector(
+            onTap: _clearSelection,
+            child: const Padding(
+              padding: EdgeInsets.only(left: 4),
+              child: Icon(Icons.close, size: 14, color: AppColors.textSecondary),
+            ),
+          ),
+        ],
       ),
     );
   }

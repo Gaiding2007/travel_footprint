@@ -11,6 +11,9 @@ class MapTransformController extends ChangeNotifier {
   Offset _offset = Offset.zero;
   Size _viewport = Size.zero;
   Rect _content = Rect.zero;
+
+  /// 初始取景用的范围（通常是"主体部分"，比 [content] 小）
+  Rect _frame = Rect.zero;
   double _fitScale = 1;
   double _minScale = 0.5;
   double _maxScale = 20;
@@ -20,7 +23,12 @@ class MapTransformController extends ChangeNotifier {
   double get scale => _scale;
   Offset get offset => _offset;
   Size get viewport => _viewport;
+
+  /// 允许拖到的范围
   Rect get content => _content;
+
+  /// 初始适配的范围
+  Rect get frame => _frame;
   double get fitScale => _fitScale;
   double get minScale => _minScale;
   double get maxScale => _maxScale;
@@ -40,51 +48,61 @@ class MapTransformController extends ChangeNotifier {
       );
 
   /// 交给外部布局调用：视口尺寸或内容包围盒变化时重新适配。
+  ///
+  /// - [content]：允许拖动的总范围（比如中国要包含南海诸岛）；
+  /// - [frame]：初始取景范围，不传就和 [content] 一样。
+  ///
   /// 布局阶段调用时传 [notify] = false，避免在 build 过程中触发重建。
   void attach({
     required Size viewport,
     required Rect content,
+    Rect? frame,
     double minFactor = 0.85,
     double maxFactor = 45,
     bool notify = true,
   }) {
+    final nextFrame = frame ?? content;
     final changed = viewport != _viewport ||
         content != _content ||
+        nextFrame != _frame ||
         minFactor != _minFactor ||
         maxFactor != _maxFactor;
     if (!changed) return;
     _viewport = viewport;
     _content = content;
+    _frame = nextFrame;
     _minFactor = minFactor;
     _maxFactor = maxFactor;
     _fitScale = _computeFit();
     _minScale = _fitScale * _minFactor;
     _maxScale = _fitScale * _maxFactor;
     _scale = _fitScale;
-    _centerContent();
+    _centerFrame();
     if (notify) notifyListeners();
   }
 
   double _computeFit() {
     if (_viewport.width <= 0 || _viewport.height <= 0) return 1;
-    if (_content.width <= 0 || _content.height <= 0) return 1;
+    if (_frame.width <= 0 || _frame.height <= 0) return 1;
     final padding = math.min(_viewport.width, _viewport.height) * 0.06;
     final width = _viewport.width - padding * 2;
     final height = _viewport.height - padding * 2;
-    return math.min(width / _content.width, height / _content.height);
+    return math.min(width / _frame.width, height / _frame.height);
   }
 
-  void _centerContent() {
+  /// 让 [frame] 居中（初始视角）
+  void _centerFrame() {
     _offset = Offset(
-      (_viewport.width - _content.width * _scale) / 2 - _content.left * _scale,
-      (_viewport.height - _content.height * _scale) / 2 - _content.top * _scale,
+      (_viewport.width - _frame.width * _scale) / 2 - _frame.left * _scale,
+      (_viewport.height - _frame.height * _scale) / 2 - _frame.top * _scale,
     );
+    _clampOffset();
   }
 
   void reset() {
     if (!isReady) return;
     _scale = _fitScale;
-    _centerContent();
+    _centerFrame();
     notifyListeners();
   }
 

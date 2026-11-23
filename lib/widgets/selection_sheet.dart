@@ -97,15 +97,14 @@ class _SelectionSheetState extends State<SelectionSheet> {
                 child: Row(
                   children: [
                     _ToggleChip(
-                      label: '显示地名',
-                      value: store.showLabels,
-                      onChanged: store.setShowLabels,
-                    ),
-                    const SizedBox(width: 8),
-                    _ToggleChip(
                       label: '仅看已选',
                       value: store.showSelectedOnly,
                       onChanged: store.setShowSelectedOnly,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      store.detailDisplay ? '地图：详细（只看去过的）' : '地图：粗略（整省/整国亮）',
+                      style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
                     ),
                   ],
                 ),

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/services.dart' show rootBundle;
@@ -97,6 +98,15 @@ class GeoData {
 
   late final Rect chinaBounds = _unionBounds(provinces.map((p) => p.shape.bounds));
 
+  /// 加上南海诸岛（三沙市那一串岛礁）后的完整范围。
+  ///
+  /// 初始取景仍然用 [chinaBounds]（只看大陆主体），但**能拖到的范围**用这个，
+  /// 否则缩放到一定程度后往下拖会被卡住，看不到南海全貌（需求 4）。
+  late final Rect chinaFullBounds = _unionBounds([
+    ...provinces.map((p) => p.shape.bounds),
+    ...cities.map((c) => c.shape.bounds),
+  ]);
+
   late final Rect worldBounds = _unionBounds(countries.map((c) => c.shape.bounds));
 
   Map<int, List<Region>> _groupCities() {
@@ -126,34 +136,76 @@ class GeoData {
   }
 
   /// 找出落点所在的省份（点击地图时用）
-  Region? provinceAt(Offset point) {
-    for (final province in provinces) {
-      if (province.shape.contains(point)) return province;
-    }
-    return null;
+  ///
+  /// 优先返回"包含落点的最小图形"，避免南海诸岛这种细碎区域被大块多边形抢走；
+  /// 没点中时允许在 [tolerance] 范围内吸附到最近的图形，这样小岛、城区也能点。
+  Region? provinceAt(Offset point, {double tolerance = 0}) {
+    final best = _smallestContaining(provinces, point);
+    return best ?? _nearest(provinces, point, tolerance);
   }
 
   /// 找出落点所在的地级市
-  Region? cityAt(Offset point) {
-    for (final city in cities) {
-      if (city.shape.contains(point)) return city;
-    }
-    return null;
+  Region? cityAt(Offset point, {double tolerance = 0}) {
+    final best = _smallestContaining(cities, point);
+    return best ?? _nearest(cities, point, tolerance);
   }
 
-  Country? countryAt(Offset point) {
-    for (final country in countriesByExtent) {
-      if (country.shape.contains(point)) return country;
-    }
-    return null;
+  Country? countryAt(Offset point, {double tolerance = 0}) {
+    final best = _smallestContaining(countries, point);
+    return best ?? _nearest(countries, point, tolerance);
   }
 
   /// 找出落点在该国内的哪个一级行政区
-  SubRegion? subRegionAt(Country country, Offset point) {
-    for (final region in country.regions) {
-      if (region.shape.contains(point)) return region;
+  SubRegion? subRegionAt(Country country, Offset point, {double tolerance = 0}) {
+    final best = _smallestContaining(country.regions, point);
+    return best ?? _nearest(country.regions, point, tolerance);
+  }
+
+  /// 包含落点的图形里面积最小的那个
+  static T? _smallestContaining<T>(List<T> items, Offset point) {
+    T? best;
+    double bestExtent = double.infinity;
+    for (final item in items) {
+      final shape = _shapeOf(item);
+      if (!shape.contains(point)) continue;
+      if (shape.extent < bestExtent) {
+        bestExtent = shape.extent;
+        best = item;
+      }
     }
-    return null;
+    return best;
+  }
+
+  /// 距离落点最近的图形（只在 [tolerance] 以内才返回）
+  static T? _nearest<T>(List<T> items, Offset point, double tolerance) {
+    if (tolerance <= 0) return null;
+    T? best;
+    var bestDistance = tolerance;
+    for (final item in items) {
+      final distance = _boundsDistance(_shapeOf(item).bounds, point);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = item;
+      }
+    }
+    return best;
+  }
+
+  static Shape _shapeOf(Object? item) {
+    if (item is Region) return item.shape;
+    if (item is SubRegion) return item.shape;
+    if (item is Country) return item.shape;
+    throw ArgumentError('不支持的类型：$item');
+  }
+
+  static double _boundsDistance(Rect rect, Offset point) {
+    final dx = point.dx < rect.left
+        ? rect.left - point.dx
+        : (point.dx > rect.right ? point.dx - rect.right : 0.0);
+    final dy = point.dy < rect.top
+        ? rect.top - point.dy
+        : (point.dy > rect.bottom ? point.dy - rect.bottom : 0.0);
+    return math.sqrt(dx * dx + dy * dy);
   }
 
   static Future<GeoData> load() async {

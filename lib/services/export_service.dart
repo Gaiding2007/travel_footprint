@@ -35,5 +35,10 @@ class ExportService {
     return MediaService.saveImage(bytes, buildFileName(prefix));
   }
 
+  /// 把已经截好的图存进相册（预览对话框确认后走这里）
+  static Future<String?> saveBytes(Uint8List bytes, {String prefix = 'travel-footprint'}) {
+    return MediaService.saveImage(bytes, buildFileName(prefix));
+  }
+
   static Future<void> share(String? uri) => MediaService.shareImage(uri);
 }
