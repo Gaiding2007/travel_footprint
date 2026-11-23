@@ -239,6 +239,41 @@ class _SelectionSheetState extends State<SelectionSheet> {
 
   Widget _buildRegionList(Country focus) {
     final store = widget.store;
+    // 没有省州划分的区域（南极洲）：只留一行"南极洲"，勾上就是整块
+    if (!focus.hasRegions) {
+      final lit = store.isCountryLit(focus.code);
+      return ListView(
+        padding: const EdgeInsets.only(bottom: 28),
+        children: [
+          InkWell(
+            onTap: () => store.toggleCountry(focus.code),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 14, 0),
+              child: Row(
+                children: [
+                  Checkbox(
+                    value: lit,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                    onChanged: (_) => store.toggleCountry(focus.code),
+                  ),
+                  Expanded(
+                    child: Text(focus.name, style: const TextStyle(fontSize: 14.5)),
+                  ),
+                  if (lit)
+                    const Icon(
+                      Icons.check_rounded,
+                      size: 17,
+                      color: AppColors.primary,
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
     final whole = store.isCountryMarkedWhole(focus.code);
     final visible = store.showSelectedOnly
         ? focus.regions

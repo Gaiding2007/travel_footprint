@@ -96,6 +96,7 @@ class FootprintMap extends StatefulWidget {
     this.onBackgroundTap,
     this.onCityTap,
     this.onRegionTap,
+    this.onWholeTap,
   });
 
   final GeoData geo;
@@ -124,6 +125,8 @@ class FootprintMap extends StatefulWidget {
   /// 国家特写里点到某个省/州之后回调
   final ValueChanged<SubRegion>? onRegionTap;
 
+  /// 没有省州划分的区域（南极洲）整块点击之后回调
+  final ValueChanged<Country>? onWholeTap;
   /// 点到了空白海面（用来取消选中）
   final VoidCallback? onBackgroundTap;
 
@@ -214,22 +217,15 @@ class _FootprintMapState extends State<FootprintMap> {
       for (final province in widget.geo.provinces) {
         outline.addPath(province.shape.path, Offset.zero);
       }
-      if (widget.store.detailDisplay) {
-        // 详细：只亮真正去过的城市（整省点亮的省份则整块亮）
-        for (final city in widget.geo.cities) {
-          if (widget.store.isCityLit(city.id)) lit.addPath(city.shape.path, Offset.zero);
+      // 国内永远是"点到哪个市就只亮哪个市"，不参与粗略/详细
+      for (final city in widget.geo.cities) {
+        if (widget.store.isCityLit(city.id)) {
+          lit.addPath(city.shape.path, Offset.zero);
         }
-        for (final province in widget.geo.provinces) {
-          if (widget.store.isProvinceLit(province.id)) {
-            lit.addPath(province.shape.path, Offset.zero);
-          }
-        }
-      } else {
-        // 粗略：去过一个市就把整个省点亮
-        for (final province in widget.geo.provinces) {
-          if (widget.store.provinceVisited(province.id)) {
-            lit.addPath(province.shape.path, Offset.zero);
-          }
+      }
+      for (final province in widget.geo.provinces) {
+        if (widget.store.isProvinceLit(province.id)) {
+          lit.addPath(province.shape.path, Offset.zero);
         }
       }
     } else {
@@ -242,6 +238,7 @@ class _FootprintMapState extends State<FootprintMap> {
       if (widget.store.detailDisplay) {
         // 详细：只亮去过的省/州；没有省州数据的国家整块亮
         for (final country in widget.geo.countries) {
+          if (country.code == 'CHN') continue; // 中国单独按省级形状画
           final wholeLit = widget.store.isWholeCountryLit(country.code);
           if (!country.hasRegions) {
             if (wholeLit) lit.addPath(country.shape.path, Offset.zero);
@@ -255,6 +252,12 @@ class _FootprintMapState extends State<FootprintMap> {
             if (widget.store.isRegionLit(country.code, region.index)) {
               lit.addPath(region.shape.path, Offset.zero);
             }
+          }
+        }
+        // 中国：详细模式只亮真正去过的那几个省
+        for (final province in widget.geo.provinces) {
+          if (widget.store.provinceVisited(province.id)) {
+            lit.addPath(province.shape.path, Offset.zero);
           }
         }
       } else {
@@ -359,6 +362,12 @@ class _FootprintMapState extends State<FootprintMap> {
 
     final focus = widget.focusCountry;
     if (focus != null) {
+      if (!focus.hasRegions) {
+        // 南极洲这种没有省州划分的：点一下整块切换
+        widget.store.toggleCountry(focus.code);
+        widget.onWholeTap?.call(focus);
+        return;
+      }
       final region = widget.geo.subRegionAt(focus, point, tolerance: tolerance);
       if (region != null) {
         widget.store.toggleRegion(focus.code, region.index);

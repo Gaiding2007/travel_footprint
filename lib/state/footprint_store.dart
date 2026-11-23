@@ -23,6 +23,9 @@ class FootprintStore extends ChangeNotifier {
   static const String _keyCities = 'lit_cities';
   static const String _keyProvinces = 'lit_provinces';
   static const String _keyCountries = 'lit_countries';
+
+  /// 中国在 world.json / admin1.json 里的 ISO 代码；国内用的是自己的一套省市数据
+  static const String _chinaCode = 'CHN';
   static const String _keyRegions = 'lit_regions';
   static const String _keyDetail = 'detail_display';
   static const String _keySelectedOnly = 'show_selected_only';
@@ -143,6 +146,7 @@ class FootprintStore extends ChangeNotifier {
   /// 走遍了这个国家：整国点亮，或者它下面所有省/州都点亮了
   bool isWholeCountryLit(String code) {
     if (_litCountries.contains(code)) return true;
+    if (code == _chinaCode) return _visitedChinaProvinceIds.length == geo.provinces.length;
     final regions = geo.countryByCode[code]?.regions ?? const <SubRegion>[];
     if (regions.isEmpty) return false;
     return litRegionCount(code) == regions.length;
@@ -150,9 +154,21 @@ class FootprintStore extends ChangeNotifier {
 
   bool isRegionLit(String code, int index) => _litRegions.contains('$code#$index');
 
+  /// 国内有没有留下过足迹（中国在世界地图上算不算点亮，全看这个）
+  bool get chinaVisited => _litCities.isNotEmpty || _litProvinces.isNotEmpty;
+
+  Set<int> get _visitedChinaProvinceIds => {
+        for (final province in geo.provinces)
+          if (provinceVisited(province.id)) province.id,
+      };
+
   /// 去过这个国家（整体点亮，或者点亮过任意一个省/州）
-  bool isCountryLit(String code) =>
-      _litCountries.contains(code) || _litRegions.any((key) => key.startsWith('$code#'));
+  bool isCountryLit(String code) {
+    if (code == _chinaCode) {
+      return _litCountries.contains(code) || chinaVisited;
+    }
+    return _litCountries.contains(code) || _litRegions.any((key) => key.startsWith('$code#'));
+  }
 
   int get litCountryCount {
     var count = 0;
@@ -173,9 +189,13 @@ class FootprintStore extends ChangeNotifier {
     return lit == regions.length ? ProvinceStatus.lit : ProvinceStatus.partial;
   }
 
-  int regionCount(String code) => geo.countryByCode[code]?.regions.length ?? 0;
+  int regionCount(String code) {
+    if (code == _chinaCode) return geo.provinces.length;
+    return geo.countryByCode[code]?.regions.length ?? 0;
+  }
 
   int litRegionCount(String code) {
+    if (code == _chinaCode) return _visitedChinaProvinceIds.length;
     var count = 0;
     for (final region in geo.countryByCode[code]?.regions ?? const <SubRegion>[]) {
       if (isRegionLit(code, region.index)) count++;
@@ -184,7 +204,8 @@ class FootprintStore extends ChangeNotifier {
   }
 
   /// 所有国家里已点亮的省/州总数
-  int get litRegionTotal => _litRegions.length;
+  /// 全世界已点亮的省/州数量（详细模式用的口径，中国算它自己的省）
+  int get litRegionTotal => _litRegions.length + _visitedChinaProvinceIds.length;
 
   Set<int> litRegionIndexes(String code) {
     final regions = geo.countryByCode[code]?.regions ?? const <SubRegion>[];
@@ -209,6 +230,17 @@ class FootprintStore extends ChangeNotifier {
 
   /// 点一下地图上的国家：整体点亮 / 整体取消
   void toggleCountry(String code) {
+    if (code == _chinaCode) {
+      if (isCountryLit(code)) {
+        _litCountries.remove(code);
+        _litCities.clear();
+        _litProvinces.clear();
+      } else {
+        _litCountries.add(code);
+      }
+      _changed();
+      return;
+    }
     if (isCountryLit(code)) {
       _litCountries.remove(code);
       _litRegions.removeWhere((key) => key.startsWith('$code#'));
@@ -219,6 +251,13 @@ class FootprintStore extends ChangeNotifier {
   }
 
   void setCountry(String code, bool lit) {
+    if (code == _chinaCode && !lit) {
+      _litCountries.remove(code);
+      _litCities.clear();
+      _litProvinces.clear();
+      _changed();
+      return;
+    }
     if (lit) {
       _litCountries.add(code);
     } else {

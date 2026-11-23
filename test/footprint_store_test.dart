@@ -122,4 +122,23 @@ void main() {
     expect(store.litProvinceCount, 0);
     expect(store.litCountryCount, 0);
   });
+
+  test('中国有足迹时，世界地图也要算已点亮', () {
+    final cnGeo = GeoData.parse(
+      '{"meta":{},"provinces":[${_box(11, '测试省', 0, 100, 30, 102, 32)}],'
+          '"cities":[${_box(1101, '甲市', 11, 100.1, 30.1, 100.9, 30.9)}]}',
+      '{"meta":{},"countries":[${_countryBox('CHN', '中国', 73, 18, 135, 53)},'
+          '${_countryBox('AAA', '甲国', 50, 10, 52, 12)}]}',
+    );
+    final cnStore = FootprintStore(cnGeo);
+    expect(cnStore.isCountryLit('CHN'), isFalse);
+
+    cnStore.toggleCity(1101);
+    expect(cnStore.isCountryLit('CHN'), isTrue, reason: '点了一个市，中国在该算去过');
+    expect(cnStore.litCountryCount, 1);
+    expect(cnStore.provinceVisited(11), isTrue);
+
+    cnStore.toggleCity(1101);
+    expect(cnStore.isCountryLit('CHN'), isFalse);
+  });
 }

@@ -45,6 +45,11 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: HomeScreen(geo: geo, store: store)));
     await tester.pumpAndSettle();
 
+    // 粗略/详细只影响全球地图，国内页面不再显示这个开关
+    await tester.tap(find.text('全球'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 400));
+
     expect(store.detailDisplay, isFalse);
     await tester.tap(find.text('详细'));
     await tester.pumpAndSettle();

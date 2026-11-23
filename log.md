@@ -148,6 +148,39 @@ docs/screenshots/                 README 截图
 
 ## 三、版本记录
 
+### 0.3.2 — 2026-11-23
+
+**用户第三轮反馈：南极洲只保留「南极洲」一项、国内点市仍会点亮整省、中国有足迹时世界地图粗略/详细都不显示。**
+
+#### 修复
+
+1. **南极洲里那个「未命名区域」**：数据层面直接从 `admin1.json` 里剔掉 `ATA`（以及 `CHN`，中国用 `cn.json` 自己的 34 个省级行政区），
+   所以南极洲特写页只剩一行「南极洲」，不再出现空白行；特写页在没有省州数据时只给一行整块勾选（`_buildRegionList` 的 `!focus.hasRegions` 分支）。
+   顺带把没有省州数据的地区文案改准：副标题「点一下就点亮整个地区」、底部按钮「选择地区」。
+2. **国内点一个市仍亮整省**：根因是国内地图的绘制还受"粗略/详细"开关影响 —— 粗略模式下会把"去过任意一个市的整个省"填蓝。
+   现在国内分支彻底不再看这个开关，永远只 `lit.addPath` 已点亮的市（以及单独勾选的整省）；「地图显示：粗略/详细」开关
+   也只在全球页面出现（`if (focus == null && !isChina)`）。
+3. **中国有足迹，世界地图不显示**：中国的足迹存在 `_litCities` / `_litProvinces` 里，而世界地图判断的是 `isCountryLit('CHN')`
+   （只看 `_litCountries` / `_litRegions`）。现在 `FootprintStore` 里给 `CHN` 加了特例：
+   - `chinaVisited` = 有任意已点亮的市或省；
+   - `isCountryLit('CHN')` 为真（粗略模式整块亮，计数 +1）；
+   - 详细模式下世界地图跳过 CHN、改用 `cn.json` 的省级形状只画去过的省（`if (country.code == 'CHN') continue;` 后再补一段）；
+   - `regionCount/litRegionCount/litRegionTotal`、`toggleCountry/setCountry` 也都带上 CHN 分支（取消中国时一并清空省市）。
+   - `admin1.json` 里不再有 CHN 的 31 条 Natural Earth 记录，避免和中国自己的省份重复。
+
+#### 修改
+
+- 「点亮的省/州」全球计数现在把中国的省也算进去（`litRegionTotal`）。
+- 版本号 `0.3.2+5`，`kAppVersion = '0.3.2'`。
+
+#### 验证记录
+
+- `flutter analyze`：No issues found；`flutter test`：**15 个用例全过**（新增「中国有足迹时，世界地图也要算已点亮」；
+  `home_screen_test` 改成先切到全球再点「详细」）。
+- 模拟器实测：国内点地图 → `已点亮 1 省 1 市`，只有黄冈变蓝；切「全球」→ 粗略模式中国整块蓝、`1 个国家和地区`；
+  切「详细」→ 中国只亮出湖北一小块；南极洲特写 → 只有一行「南极洲」，勾上后整块变蓝。
+- 数据重建顺序：先 `node tools/build_admin1.mjs` 再 `node tools/build_taiwan.mjs`（后者要用 ECharts 的台湾县市覆盖前者）。
+
 ### 0.3.1 — 2026-11-23
 
 **按用户第二轮反馈修三处：南极洲要保留（用「整块」选项）、国内点城市只点亮该城市、飞地不再跟着一起亮。**

@@ -135,6 +135,12 @@ class _HomeScreenState extends State<HomeScreen> {
     _toast(lit ? '已点亮「${displayRegionName(region)}」' : '已取消「${displayRegionName(region)}」');
   }
 
+  /// 没有省州划分的区域（南极洲）整块点击
+  void _onWholeTap(Country country) {
+    final lit = widget.store.isCountryLit(country.code);
+    _toast(lit ? '已点亮「${country.name}」' : '已取消「${country.name}」');
+  }
+
   void _toast(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -372,7 +378,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _buildProgress('地级市的进度', store.litCityCount, widget.geo.cities.length),
             ] else
               _buildProgress('国家和地区的进度', store.litCountryCount, widget.geo.countries.length),
-            if (focus == null) ...[
+            if (focus == null && !isChina) ...[
               const SizedBox(height: 12),
               _buildDetailToggle(),
             ],
@@ -605,7 +611,7 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 2),
               Text(
                 focus != null
-                    ? '点一下省/州就能点亮'
+                    ? (focus.hasRegions ? '点一下省/州就能点亮' : '点一下就点亮整个地区')
                     : _mode == MapMode.china
                         ? '记录走过的地方'
                         : '记录去过的国家',
@@ -702,6 +708,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           onBackgroundTap: _clearSelection,
                           onCityTap: _onCityTap,
                           onRegionTap: _onRegionTap,
+                          onWholeTap: _onWholeTap,
                         ),
                       ),
                       Positioned(left: 12, top: 12, child: _buildCounter()),
@@ -825,7 +832,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 icon: const Icon(Icons.checklist_rounded, size: 19),
                 label: Text(
                   _focusCountry != null
-                      ? '选择省/州'
+                      ? (_focusCountry!.hasRegions ? '选择省/州' : '选择地区')
                       : _mode == MapMode.china
                           ? '选择城市'
                           : '选择国家',

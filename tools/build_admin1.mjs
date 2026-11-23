@@ -244,6 +244,13 @@ for (let i = 0; i < records.length; i++) {
     continue;
   }
 
+  // 中国用自己的一套省级数据（assets/geo/cn.json，34 个省级行政区），
+  // 南极洲没有真正的省州划分 —— 这两个都不写进 admin1.json
+  if (code === 'CHN' || code === 'ATA') {
+    droppedFeatures++;
+    continue;
+  }
+
   const region = buildRegion(nameZh || nameEn, nameEn, rings, labelLon, labelLat, tolerance, minRingArea);
   if (!region) {
     droppedFeatures++;
