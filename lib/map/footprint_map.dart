@@ -36,6 +36,15 @@ String shortRegionName(String name) {
   return name;
 }
 
+/// 省/州名字为空（南极洲的数据里有这种）时给个兜底显示名
+String displayRegionName(SubRegion region) {
+  final name = shortRegionName(region.name).trim();
+  if (name.isNotEmpty) return name;
+  final full = region.fullName.trim();
+  if (full.isNotEmpty) return full;
+  return '未命名区域';
+}
+
 /// 中国地图的默认取景范围（略去南海深处，避免大片空白海面）
 Rect chinaViewBounds() =>
     Rect.fromPoints(projectLonLat(72.5, 54.8), projectLonLat(136.0, 15.5));
@@ -45,6 +54,32 @@ const double kCityLevelFactor = 2.2;
 
 /// 点击时允许吸附的范围（屏幕像素）
 const double _kTapTolerance = 14;
+
+/// 找出"被点亮的图形包住、但自己没点亮"的飞地（例如蒙古的乌兰巴托被中央省包着）。
+/// 这些小块要在点亮层之上重新画成白色，否则会跟着一起变蓝。
+List<Shape> computeEnclaveHoles({
+  required List<Shape> all,
+  required List<Shape> lit,
+}) {
+  if (lit.isEmpty) return const <Shape>[];
+  final holes = <Shape>[];
+  for (final shape in all) {
+    if (lit.any((item) => identical(item, shape))) continue;
+    final bounds = shape.bounds;
+    final contained = lit.any((outer) {
+      if (outer.extent <= shape.extent * 3) return false;
+      final outerBounds = outer.bounds;
+      // 先看包围盒，再看真实几何（避免小岛之类的误判）
+      if (!outerBounds.contains(bounds.topLeft) ||
+          !outerBounds.contains(bounds.bottomRight)) {
+        return false;
+      }
+      return outer.contains(bounds.center);
+    });
+    if (contained) holes.add(shape);
+  }
+  return holes;
+}
 
 class FootprintMap extends StatefulWidget {
   const FootprintMap({
@@ -59,6 +94,8 @@ class FootprintMap extends StatefulWidget {
     this.onEnterCountry,
     this.onCountryLongPress,
     this.onBackgroundTap,
+    this.onCityTap,
+    this.onRegionTap,
   });
 
   final GeoData geo;
@@ -81,6 +118,12 @@ class FootprintMap extends StatefulWidget {
   /// 长按某个国家（同样进入国家特写，是捷径）
   final ValueChanged<Country>? onCountryLongPress;
 
+  /// 国内模式点到某个城市之后回调（用于顶部提示点到了哪个市）
+  final ValueChanged<Region>? onCityTap;
+
+  /// 国家特写里点到某个省/州之后回调
+  final ValueChanged<SubRegion>? onRegionTap;
+
   /// 点到了空白海面（用来取消选中）
   final VoidCallback? onBackgroundTap;
 
@@ -91,6 +134,7 @@ class FootprintMap extends StatefulWidget {
 class _FootprintMapState extends State<FootprintMap> {
   Path _allPath = Path();
   Path _litPath = Path();
+  Path _overlayPath = Path();
   Path _outlinePath = Path();
   Path _selectedPath = Path();
 
@@ -132,18 +176,37 @@ class _FootprintMapState extends State<FootprintMap> {
   void _rebuild() {
     final all = Path();
     final lit = Path();
+    final overlay = Path();
     final outline = Path();
     final selected = Path();
 
     final focus = widget.focusCountry;
     if (focus != null) {
+      final litRegions = <SubRegion>[];
       for (final region in focus.regions) {
         all.addPath(region.shape.path, Offset.zero);
         if (widget.store.isRegionLit(focus.code, region.index)) {
           lit.addPath(region.shape.path, Offset.zero);
+          litRegions.add(region);
+        }
+      }
+      // 没有下级省州的地方，或者用户勾了"整块"（南极洲）：整块点亮
+      if (widget.store.isCountryMarkedWhole(focus.code) || !focus.hasRegions) {
+        if (widget.store.isCountryLit(focus.code)) {
+          lit.addPath(focus.shape.path, Offset.zero);
         }
       }
       outline.addPath(focus.shape.path, Offset.zero);
+      // 飞地修正：被点亮的省州把里面没点亮的小块（如蒙古的乌兰巴托）重新盖成白色。
+      // 勾了"整块"的时候不需要挖洞，否则整个国家会被自己的子区域盖白。
+      if (!widget.store.isCountryMarkedWhole(focus.code)) {
+        for (final shape in computeEnclaveHoles(
+          all: [for (final region in focus.regions) region.shape],
+          lit: [for (final region in litRegions) region.shape],
+        )) {
+          overlay.addPath(shape.path, Offset.zero);
+        }
+      }
     } else if (widget.mode == MapMode.china) {
       for (final city in widget.geo.cities) {
         all.addPath(city.shape.path, Offset.zero);
@@ -206,6 +269,7 @@ class _FootprintMapState extends State<FootprintMap> {
 
     _allPath = all;
     _litPath = lit;
+    _overlayPath = overlay;
     _outlinePath = outline;
     _selectedPath = selected;
   }
@@ -224,8 +288,22 @@ class _FootprintMapState extends State<FootprintMap> {
   Rect get _frameBounds {
     final focus = widget.focusCountry;
     if (focus != null) {
-      final bounds = _coreBounds(focus);
-      return bounds.inflate(bounds.longestSide * 0.06);
+      final bounds = _coreBounds(focus).inflate(
+        _coreBounds(focus).longestSide * 0.06,
+      );
+      // 南极洲这种"又宽又扁"的地方，按宽度取景会缩成一条线，
+      // 这里改成按高度取景、左右可以拖（content 仍是完整范围）。
+      final aspect = bounds.width / bounds.height;
+      if (aspect > 5) {
+        final halfWidth = bounds.height * 1.25;
+        return Rect.fromLTRB(
+          bounds.center.dx - halfWidth,
+          bounds.top,
+          bounds.center.dx + halfWidth,
+          bounds.bottom,
+        );
+      }
+      return bounds;
     }
     return widget.mode == MapMode.china ? chinaViewBounds() : widget.geo.worldBounds;
   }
@@ -282,7 +360,10 @@ class _FootprintMapState extends State<FootprintMap> {
     final focus = widget.focusCountry;
     if (focus != null) {
       final region = widget.geo.subRegionAt(focus, point, tolerance: tolerance);
-      if (region != null) widget.store.toggleRegion(focus.code, region.index);
+      if (region != null) {
+        widget.store.toggleRegion(focus.code, region.index);
+        widget.onRegionTap?.call(region);
+      }
       return;
     }
 
@@ -290,11 +371,6 @@ class _FootprintMapState extends State<FootprintMap> {
       final country = widget.geo.countryAt(point, tolerance: tolerance);
       if (country == null) {
         widget.onBackgroundTap?.call();
-        return;
-      }
-      if (!country.hasRegions) {
-        // 没有下级省州的国家，点一下就点亮/取消
-        widget.store.toggleCountry(country.code);
         return;
       }
       if (country.code == widget.selectedCountryCode) {
@@ -305,13 +381,15 @@ class _FootprintMapState extends State<FootprintMap> {
       return;
     }
 
-    if (controller.scale >= controller.fitScale * kCityLevelFactor) {
-      final city = widget.geo.cityAt(point, tolerance: tolerance);
-      if (city != null) {
-        widget.store.toggleCity(city.id);
-        return;
-      }
+    // 国内：点到哪个市就只点亮那个市（需求 2）。
+    // 直辖市、港澳台这种只有一条记录的省级行政区，点到的也是它下面的那一条。
+    final city = widget.geo.cityAt(point, tolerance: tolerance);
+    if (city != null) {
+      widget.store.toggleCity(city.id);
+      widget.onCityTap?.call(city);
+      return;
     }
+    // 极少数没有下级记录的空白区域，退一步按省级处理
     final province = widget.geo.provinceAt(point, tolerance: tolerance);
     if (province != null) widget.store.toggleProvince(province.id);
   }
@@ -370,6 +448,7 @@ class _FootprintMapState extends State<FootprintMap> {
                     controller: widget.controller,
                     allPath: _allPath,
                     litPath: _litPath,
+                    overlayPath: _overlayPath,
                     outlinePath: _outlinePath,
                     selectedPath: _selectedPath,
                     mode: widget.mode,
@@ -390,6 +469,7 @@ class _FootprintPainter extends CustomPainter {
     required this.controller,
     required this.allPath,
     required this.litPath,
+    required this.overlayPath,
     required this.outlinePath,
     required this.selectedPath,
     required this.mode,
@@ -399,6 +479,7 @@ class _FootprintPainter extends CustomPainter {
   final MapTransformController controller;
   final Path allPath;
   final Path litPath;
+  final Path overlayPath;
   final Path outlinePath;
   final Path selectedPath;
   final MapMode mode;
@@ -422,6 +503,10 @@ class _FootprintPainter extends CustomPainter {
 
     canvas.drawPath(allPath, Paint()..color = Colors.white);
     canvas.drawPath(litPath, Paint()..color = kLitFill);
+    // 飞地：被点亮的大块里，没点亮的小块要重新盖回白色
+    if (overlayPath.getBounds().isEmpty == false) {
+      canvas.drawPath(overlayPath, Paint()..color = Colors.white);
+    }
 
     if (focus) {
       canvas.drawPath(allPath, _stroke(0.7 / scale, _kRegionBorder));
@@ -449,6 +534,7 @@ class _FootprintPainter extends CustomPainter {
         oldDelegate.controller.offset != controller.offset ||
         oldDelegate.allPath != allPath ||
         oldDelegate.litPath != litPath ||
+        oldDelegate.overlayPath != overlayPath ||
         oldDelegate.selectedPath != selectedPath ||
         oldDelegate.focus != focus ||
         oldDelegate.mode != mode;

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/geo_data.dart';
-import '../map/footprint_map.dart' show MapMode, shortRegionName;
+import '../map/footprint_map.dart' show MapMode, displayRegionName;
 import '../state/footprint_store.dart';
 import '../theme.dart';
 
@@ -239,47 +239,86 @@ class _SelectionSheetState extends State<SelectionSheet> {
 
   Widget _buildRegionList(Country focus) {
     final store = widget.store;
+    final whole = store.isCountryMarkedWhole(focus.code);
     final visible = store.showSelectedOnly
         ? focus.regions
             .where((region) => store.isRegionLit(focus.code, region.index))
             .toList(growable: false)
         : focus.regions;
 
-    if (visible.isEmpty) {
-      return _EmptyHint(text: '${focus.name}还没有点亮的地方，回地图点一下试试');
-    }
-
-    return ListView.builder(
+    return ListView(
       padding: const EdgeInsets.only(bottom: 28),
-      itemCount: visible.length,
-      itemBuilder: (context, index) {
-        final region = visible[index];
-        final lit = store.isRegionLit(focus.code, region.index);
-        return InkWell(
-          onTap: () => store.toggleRegion(focus.code, region.index),
+      children: [
+        // 南极洲这种没有真正省州划分的地方，用一个"整块"选项
+        InkWell(
+          onTap: () => store.setWholeCountry(focus.code, !whole),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 0, 14, 0),
+            padding: const EdgeInsets.fromLTRB(10, 0, 14, 4),
             child: Row(
               children: [
                 Checkbox(
-                  value: lit,
+                  value: whole,
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   visualDensity: VisualDensity.compact,
-                  onChanged: (_) => store.toggleRegion(focus.code, region.index),
+                  onChanged: (value) =>
+                      store.setWholeCountry(focus.code, value ?? false),
                 ),
-                Expanded(
-                  child: Text(
-                    shortRegionName(region.name),
-                    style: const TextStyle(fontSize: 14.5),
+                const Expanded(
+                  child: Text('整块（整个区域）', style: TextStyle(fontSize: 14.5)),
+                ),
+                if (whole)
+                  const Icon(
+                    Icons.check_rounded,
+                    size: 17,
+                    color: AppColors.primary,
                   ),
-                ),
-                if (lit)
-                  const Icon(Icons.check_rounded, size: 17, color: AppColors.primary),
               ],
             ),
           ),
-        );
-      },
+        ),
+        const Divider(height: 1, color: AppColors.divider),
+        if (visible.isEmpty)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 20, 16, 20),
+            child: Text(
+              '这里还没有点亮的地块，回地图点一下试试',
+              style: TextStyle(fontSize: 13.5, color: AppColors.textSecondary),
+            ),
+          )
+        else
+          ...visible.map((region) {
+            final lit = store.isRegionLit(focus.code, region.index);
+            return InkWell(
+              onTap: () => store.toggleRegion(focus.code, region.index),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 0, 14, 0),
+                child: Row(
+                  children: [
+                    Checkbox(
+                      value: lit,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                      onChanged: (_) =>
+                          store.toggleRegion(focus.code, region.index),
+                    ),
+                    Expanded(
+                      child: Text(
+                        displayRegionName(region),
+                        style: const TextStyle(fontSize: 14.5),
+                      ),
+                    ),
+                    if (lit)
+                      const Icon(
+                        Icons.check_rounded,
+                        size: 17,
+                        color: AppColors.primary,
+                      ),
+                  ],
+                ),
+              ),
+            );
+          }),
+      ],
     );
   }
 

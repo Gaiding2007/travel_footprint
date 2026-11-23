@@ -57,6 +57,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final store = widget.store;
     final focus = _focusCountry;
     if (focus != null) {
+      if (!focus.hasRegions) {
+        return store.isCountryLit(focus.code) ? '已点亮这个国家和地区' : '还没点亮';
+      }
       return '已点亮 ${store.litRegionCount(focus.code)} 个省/州';
     }
     if (_mode == MapMode.china) {
@@ -97,8 +100,8 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     if (!country.hasRegions) {
-      widget.store.toggleCountry(country.code);
-      _toast('${country.name} 没有下级省州数据，直接切换点亮');
+      // 南极洲这类没有下级省州的地方：仍然进特写，界面里给一个"整块"选项
+      setState(() => _focusCountry = country);
       return;
     }
     setState(() => _focusCountry = country);
@@ -116,6 +119,20 @@ class _HomeScreenState extends State<HomeScreen> {
     final size = _controller.viewport;
     if (size.isEmpty) return;
     _controller.zoomBy(factor, Offset(size.width / 2, size.height / 2));
+  }
+
+  /// 国内点到城市：立刻告诉用户点亮/取消了哪个市（地图上不再画地名）
+  void _onCityTap(Region city) {
+    final lit = widget.store.isCityLit(city.id);
+    _toast(lit ? '已点亮「${city.name}」' : '已取消「${city.name}」');
+  }
+
+  /// 国家特写点到省/州：同样给个名字提示
+  void _onRegionTap(SubRegion region) {
+    final focus = _focusCountry;
+    if (focus == null) return;
+    final lit = widget.store.isRegionLit(focus.code, region.index);
+    _toast(lit ? '已点亮「${displayRegionName(region)}」' : '已取消「${displayRegionName(region)}」');
   }
 
   void _toast(String message) {
@@ -345,7 +362,9 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
             const SizedBox(height: 14),
-            if (focus != null)
+            if (focus != null && !focus.hasRegions)
+              _buildWholeOption(focus)
+            else if (focus != null)
               _buildProgress('${focus.name}的省/州进度', store.litRegionCount(focus.code), focus.regions.length)
             else if (isChina) ...[
               _buildProgress('省级行政区的进度', store.litProvinceCount, widget.geo.provinces.length),
@@ -361,10 +380,12 @@ class _HomeScreenState extends State<HomeScreen> {
             if (chips.isEmpty)
               Text(
                 focus != null
-                    ? '点一下${focus.name}地图上的省/州就能点亮，点左上角可以返回世界地图。'
+                    ? (focus.hasRegions
+                        ? '点一下${focus.name}地图上的省/州就能点亮，点左上角可以返回世界地图。'
+                        : '${focus.name}没有更细的省/州，点上面的整块选项就能点亮它。')
                     : isChina
-                        ? '点一下地图上的省份就能点亮；放大后可以点单个城市。'
-                        : '先点一下地图上的国家高亮它，再点一下进入它的省/州；没有省州数据的国家一点即切换。',
+                        ? '点一下地图上的哪个城市，就点亮哪个城市；整省可以用「选择城市」里的省份勾选框批量选。'
+                        : '先点一下地图上的国家高亮它，再点一下进入它的省/州。',
                 style: const TextStyle(fontSize: 12, height: 1.5, color: AppColors.textSecondary),
               )
             else ...[
@@ -421,6 +442,57 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  /// 没有下级省/州的地方（例如南极洲）：给一个"整块"选项
+  Widget _buildWholeOption(Country country) {
+    final lit = widget.store.isCountryLit(country.code);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => widget.store.toggleCountry(country.code),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+        decoration: BoxDecoration(
+          color: lit ? const Color(0xFFEDF4FF) : const Color(0xFFF4F6FA),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: lit ? const Color(0xFFB9D4FF) : const Color(0xFFE1E6EF)),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              lit ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
+              size: 20,
+              color: lit ? const Color(0xFF2F6BD8) : AppColors.textSecondary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '整块${country.name}',
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    '这里没有更细的省/州，只能整块勾选',
+                    style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              lit ? '已点亮' : '未点亮',
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: lit ? const Color(0xFF2F6BD8) : AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -628,6 +700,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           onEnterCountry: _enterCountry,
                           onCountryLongPress: _enterCountry,
                           onBackgroundTap: _clearSelection,
+                          onCityTap: _onCityTap,
+                          onRegionTap: _onRegionTap,
                         ),
                       ),
                       Positioned(left: 12, top: 12, child: _buildCounter()),

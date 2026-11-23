@@ -126,14 +126,12 @@ cn.meta.taiwanCities = taiwanCities.length;
 fs.writeFileSync(CN_PATH, JSON.stringify(cn));
 
 const world = JSON.parse(fs.readFileSync(WORLD_PATH, 'utf8'));
-const before = world.countries.length;
-world.countries = world.countries.filter((country) => country.i !== 'ATA');
 world.meta = world.meta ?? {};
-world.meta.removedAntarctica = before - world.countries.length;
+delete world.meta.removedAntarctica;
 fs.writeFileSync(WORLD_PATH, JSON.stringify(world));
 
 const points = taiwanCities.reduce((sum, c) => sum + c.r.reduce((s, r) => s + r.length / 2, 0), 0);
 console.log(
   `台湾县市 ${taiwanCities.length} 个（${taiwanCities.map((c) => c.n).join('、')}），共 ${Math.round(points)} 个坐标点`,
 );
-console.log(`cn.json 城市总数 ${cn.cities.length}，world.json 国家 ${before} -> ${world.countries.length}`);
+console.log(`cn.json 城市总数 ${cn.cities.length}，world.json 国家 ${world.countries.length}（含南极洲）`);

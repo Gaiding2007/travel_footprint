@@ -194,6 +194,19 @@ class FootprintStore extends ChangeNotifier {
     };
   }
 
+  /// 单独标了"整块"的国家/地区（南极洲这种没有真实省州划分的用它）
+  bool isCountryMarkedWhole(String code) => _litCountries.contains(code);
+
+  void setWholeCountry(String code, bool lit) {
+    if (lit) {
+      _litCountries.add(code);
+      _litRegions.removeWhere((key) => key.startsWith('$code#'));
+    } else {
+      _litCountries.remove(code);
+    }
+    _changed();
+  }
+
   /// 点一下地图上的国家：整体点亮 / 整体取消
   void toggleCountry(String code) {
     if (isCountryLit(code)) {
