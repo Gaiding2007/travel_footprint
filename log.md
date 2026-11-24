@@ -105,9 +105,13 @@ git -c http.sslBackend=openssl -c http.sslVerify=false -c credential.helper=mana
   - zigzag 还原：`x = (code - 64) >> 1 ^ -(code & 1)` 累加后除以 `UTF8Scale || 1024`。
   - 世界国家做 Douglas-Peucker 简化（`WORLD_TOL = 0.03`），国内不简化。
 - 产物（入库，App 直接读）：
-  - `assets/geo/cn.json`：34 个省级行政区 + 392 个地级行政区（含台湾 21 个县市），88,231 个坐标点。
-  - `assets/geo/world.json`：236 个国家和地区，84,583 个坐标点。
-  - `assets/geo/admin1.json`：239 个国家的一级行政区（省/州），共 4,283 个，3.15 MB（0.2.0 新增）。
+  - `assets/geo/cn.json`：34 个省级行政区 + 393 个地级行政区（含台湾 22 个县市），省界为 Natural Earth 10m 台湾轮廓、县市为 ECharts 精细边界。
+  - `assets/geo/world.json`：242 个国家和地区。
+  - `assets/geo/admin1.json`：237 个国家的一级行政区（省/州），共 4,250 个（0.2.0 新增，0.3.2 起不再包含中国与南极洲）。
+- 台湾省界（`province id 71`）单独用 Natural Earth 10m `admin_0_countries` 的台湾要素重建：
+  `tools/build_ne_taiwan_outline.mjs`（`https://naciscdn.org/naturalearth/10m/cultural/ne_10m_admin_0_countries.zip`，解压到 `tools/cache/ne_10m_admin_0/`），
+  Douglas-Peucker `0.002°` 简化后是 **8 环 / 471 点、面积 3.22 平方度**（正确值约 3.2）。
+  早期用 `polygon-clipping` 把 22 个县市直接求并集的做法会丢掉西海岸一整条（主岛环只剩 2.075 平方度），已废弃。
 - `assets/geo/admin1.json` 来自 Natural Earth 10m `admin_1_states_provinces`
   （`https://naciscdn.org/naturalearth/10m/cultural/ne_10m_admin_1_states_provinces.zip`，解压到 `tools/cache/ne_10m_admin_1/`），
   由 `tools/build_admin1.mjs` 解析 shp/dbf（自己写的 SHP 读取器）、简化、量化后输出；国家用 ISO3 码与 `world.json` 对齐（`i` 字段就是 ISO3）。
@@ -147,6 +151,35 @@ docs/screenshots/                 README 截图
 ---
 
 ## 三、版本记录
+
+### 0.3.4 — 2026-11-24
+
+**用户反馈：「台湾这个边缘错了，然后这个岛屿还是不亮」。**
+
+#### 原因
+
+1. **边缘错**：0.3.3 里台湾省界是把 22 个县市的多边形用 `polygon-clipping` 求并集得到的，
+   但这些县市的西海岸边界本身不闭合（数据自带缺口），求并集时西海岸被整条裁掉 ——
+   主岛环面积只有 2.075 平方度（真实的台湾约 3.2），所以看上去"缺了一块"。
+2. **岛屿不亮**：核查后是点击命中问题，不是渲染问题 —— 台湾在全局视野下只有十几像素高，
+   点偏一点就会落到福建/浙江的市上（实测点 `(812,922)` 提示的是「宁波」）。
+   渲染与状态链路本身正常：面板勾选台北、放大后点花莲都能正确点亮。
+
+#### 修复
+
+1. 台湾省界改用 Natural Earth 10m `admin_0_countries` 的台湾要素重建（新增 `tools/build_ne_taiwan_outline.mjs`）：
+   8 环 / 471 点、面积 3.22 平方度，海岸线与县市边界基本重合（偏差 1km 内），西海岸锯齿和细尖刺一并消失。
+2. 点击容差 `_kTapTolerance` 从 14px 提到 **20px**（`lib/map/footprint_map.dart`），
+   窄小的岛、飞地更容易点中；容差随缩放换算成地图单位，放大后不会误点相邻区域。
+3. `tools/build_taiwan_outline.mjs` 退役，构建顺序改为：
+   `build_geo.mjs` → `build_admin1.mjs` → `build_taiwan.mjs` → `build_ne_taiwan_outline.mjs` → `fix_admin1_overlaps.mjs`。
+
+#### 验证记录
+
+- `flutter analyze`：No issues found；`flutter test`：15 个用例全过。
+- 模拟器（emulator-5554）：release 包安装后台湾轮廓干净；放大到台湾，点岛中央 → 提示「已点亮「花莲」」、
+  花莲整块变蓝、计数 `4 省 4 市`；面板里台湾 22 个县市齐全（台北/高雄/台南/台中/新北…）。
+- release 包 49,601,082 B → `dist/travel-footprint-0.3.4.apk`。
 
 ### 0.3.3 — 2026-11-24
 

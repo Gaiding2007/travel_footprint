@@ -53,7 +53,7 @@ Rect chinaViewBounds() =>
 const double kCityLevelFactor = 2.2;
 
 /// 点击时允许吸附的范围（屏幕像素）
-const double _kTapTolerance = 14;
+const double _kTapTolerance = 20;
 
 /// 找出"被点亮的图形包住、但自己没点亮"的飞地（例如蒙古的乌兰巴托被中央省包着）。
 /// 这些小块要在点亮层之上重新画成白色，否则会跟着一起变蓝。

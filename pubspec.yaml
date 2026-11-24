@@ -1,7 +1,7 @@
 name: travel_footprint
 description: 旅行足迹地图：点亮去过的省市与国家
 publish_to: 'none'
-version: 0.3.3+6
+version: 0.3.4+7
 
 environment:
   sdk: ^3.10.0
