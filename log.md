@@ -148,6 +148,46 @@ docs/screenshots/                 README 截图
 
 ## 三、版本记录
 
+### 0.3.3 — 2026-11-24
+
+**用户第四轮反馈（7 条）：台湾省界精度、系统导航栏下隐、全球详细模式要显示到市、返回键直接退出、部分国家省界重叠、小岛点亮不全、版本号。**
+
+#### 修复
+
+1. **台湾省界精度**：原来 cn.json 里台湾省（id 71）的轮廓是参考站那份粗数据（11 个环、约 66 个点）。
+   新增 `tools/build_taiwan_outline.mjs`：用 `polygon-clipping` 把 22 个县市的多边形做真正的并集，
+   得到与县市边界完全贴合、没有重叠的省界 —— 现在是 **10 个环 / 527 个点**（含澎湖、金门、马祖等离岛）。
+2. **系统导航栏自动下隐**：`main()` 里 `SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: [SystemUiOverlay.top])`，
+   保留顶部状态栏、收起底部导航栏，地图能多占一点高度。
+3. **全球详细模式要精确到市**：世界地图的详细分支里，中国改成画「已点亮的市」（`geo.cities` + `isCityLit`），
+   整省勾选过的再补一层省级形状；不再是只画到省。
+4. **返回键直接退出**：`HomeScreen` 外面包了 `PopScope(canPop: false)` ——
+   有国家特写时先退回世界地图、有选中高亮时先取消选中，都不是才提示"再按一次返回键退出"，2 秒内连按两次才真的退出。
+5. **部分国家省界重叠（泰国等）**：根因是 Natural Earth 10m 的省界简化后相邻省互相压住。
+   两步处理：① `build_admin1.mjs` 把简化容差从 `0.03°` 压到 `0.012°`（并按面积自适应，最小 0.0015°）；
+   ② 新增 `tools/fix_admin1_overlaps.mjs`，用 `polygon-clipping` 对同一国家内的省州做差集，把后画的重叠部分裁掉
+   （大块保持原样、小块被裁），193 个国家 / 3,640 个区域被裁过。
+   抽样校验（`tools/check_geo.py`）：泰国 77 个府、4,000 个随机点，**覆盖层数从出现 2 层降到全部 ≤1 层**。
+6. **小岛点亮不全（挪威北部等）**：`build_geo.mjs` 的世界国家轮廓简化容差从 `0.03°` 降到 `0.008°`，
+   小岛不再被抹成一条线；挪威现在有 120 个环（其中 11 个是小于 7 个点的小岛环）。世界国家数 236 → 242。
+7. **数据体量**：`cn.json` 1.50MB、`world.json` 3.48MB、`admin1.json` 6.02MB，release 包 47.3MB。
+
+#### 新增/修改的构建工具
+
+- `tools/build_taiwan_outline.mjs`：台湾省界 = 22 个县市的并集（依赖 `polygon-clipping`，见 `tools/package.json`）。
+- `tools/fix_admin1_overlaps.mjs`：省州去重叠，支持 `--country=THA`、`--dry`。
+- `tools/check_geo.py`：数据体检（省界重叠抽样、小岛环数量、台湾省界点数、各文件体积）。
+- **构建顺序（重要）**：`build_geo.mjs` → `build_admin1.mjs` → `build_taiwan.mjs` → `build_taiwan_outline.mjs` → `fix_admin1_overlaps.mjs`。
+  前四步会重写整个 JSON，所以去重叠必须放在最后。
+
+#### 验证记录
+
+- `flutter analyze`：No issues found；`flutter test`：**15 个用例全过**
+  （`enclave_test` 改成"要么数据自带乌兰巴托的洞、要么兜底挖洞生效"，因为新数据里中央省已经有洞了）。
+- 模拟器：安装 release 包后地图正常加载、系统导航栏隐藏（首次会弹一次 "Viewing full screen" 提示）。
+- 台湾省界用 Python 单独渲染 `shots/taiwan_check.png` 确认：省界与县市边界完全贴合。
+- 说明：这轮验证时模拟器正在被另一个 App 占用，除首页外的手势类验证（返回键、全球详细、泰国放大）以代码 + 数据校验为主。
+
 ### 0.3.2 — 2026-11-23
 
 **用户第三轮反馈：南极洲只保留「南极洲」一项、国内点市仍会点亮整省、中国有足迹时世界地图粗略/详细都不显示。**

@@ -56,16 +56,20 @@ void main() {
     );
     expect(identical(ubt, tow), isFalse);
 
-    // 乌兰巴托整块落在中央省内部 —— 这就是用户说的"点中央省乌兰巴托也亮了"
+    // 乌兰巴托整块落在中央省的地盘里 —— 这就是用户说的"点中央省乌兰巴托也亮了"。
+    // 0.3.3 换成更细的省界之后，中央省自己就带了一个"乌兰巴托"的洞（rings >= 2），
+    // 所以要么数据里已经有洞、要么兜底的挖洞逻辑要把乌兰巴托挑出来，两者至少成立一个。
     expect(tow.shape.bounds.contains(ubt.shape.bounds.topLeft), isTrue);
     expect(tow.shape.bounds.contains(ubt.shape.bounds.bottomRight), isTrue);
-    expect(tow.shape.contains(ubt.shape.bounds.center), isTrue);
 
-    // 只点亮中央省时，飞地修正必须把乌兰巴托挑出来盖回白色
+    final ubCenter = ubt.shape.bounds.center;
+    final alreadyHole = !tow.shape.contains(ubCenter);
+
     final holes = computeEnclaveHoles(
       all: [for (final region in regions) region.shape],
       lit: [tow.shape],
     );
-    expect(holes.any((shape) => identical(shape, ubt.shape)), isTrue);
+    final punched = holes.any((shape) => identical(shape, ubt.shape));
+    expect(alreadyHole || punched, isTrue);
   });
 }

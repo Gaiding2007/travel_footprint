@@ -254,9 +254,14 @@ class _FootprintMapState extends State<FootprintMap> {
             }
           }
         }
-        // 中国：详细模式只亮真正去过的那几个省
+        // 中国：详细模式按「去过的市」画（和国内页一致），整省勾选的再补上省级形状
+        for (final city in widget.geo.cities) {
+          if (widget.store.isCityLit(city.id)) {
+            lit.addPath(city.shape.path, Offset.zero);
+          }
+        }
         for (final province in widget.geo.provinces) {
-          if (widget.store.provinceVisited(province.id)) {
+          if (widget.store.isProvinceLit(province.id)) {
             lit.addPath(province.shape.path, Offset.zero);
           }
         }

@@ -230,9 +230,11 @@ for (let i = 0; i < records.length; i++) {
   const labelLat = Number(props.latitude);
   const areaDeg = Number(props.area_sqkm) > 0 ? Number(props.area_sqkm) : 10000;
 
-  // 岛屿/小区域的简化力度小一些，大区域大一些
-  const tolerance = Math.min(Math.max(Math.sqrt(areaDeg) / 2600, 0.004), 0.03);
-  const minRingArea = Math.max(areaDeg / 9000, 0.0008);
+  // 岛屿/小区域的简化力度小一些，大区域大一些。
+  // 原来上限 0.03°(≈3km)，相邻省各自简化后边界会互相压到一起（泰国那种"省界重叠"就是这么来的），
+  // 现在压到 0.012°（≈1.3km）以内，并把小岛的保留阈值降到 0.0002。
+  const tolerance = Math.min(Math.max(Math.sqrt(areaDeg) / 6000, 0.0015), 0.012);
+  const minRingArea = Math.max(areaDeg / 30000, 0.0002);
 
   if (code === 'TWN') {
     const iso = (props.iso_3166_2 || '').trim();

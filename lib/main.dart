@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'app_info.dart';
 import 'data/geo_data.dart';
@@ -8,6 +9,11 @@ import 'theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // 使用时把系统导航栏收起来（保留顶部状态栏），多留一点看地图的高度。
+  SystemChrome.setEnabledSystemUIMode(
+    SystemUiMode.manual,
+    overlays: const [SystemUiOverlay.top],
+  );
   runApp(const TravelFootprintApp());
 }
 

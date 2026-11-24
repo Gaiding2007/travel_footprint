@@ -1,6 +1,5 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app_info.dart';
 import '../data/geo_data.dart';
@@ -35,6 +34,7 @@ class _HomeScreenState extends State<HomeScreen> {
   /// 世界地图上点了一下、等待第二下进入的国家（只高亮，不点亮）
   Country? _selectedCountry;
   bool _exporting = false;
+  DateTime? _lastBackAt;
 
   @override
   void initState() {
@@ -262,34 +262,58 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final maxMapHeight = constraints.maxWidth * 1.16;
-            final mapHeight =
-                (constraints.maxHeight * 0.58).clamp(240.0, maxMapHeight).toDouble();
-            return Column(
-              children: [
-                _buildHeader(),
-                SizedBox(
-                  height: mapHeight,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
-                    child: _buildMapCard(),
+    return PopScope(
+      // 返回键优先「退一步」：从国家特写退回世界地图，再按一次才退出。
+      // 双击退出用 _lastBackAt 记录时间，避免误触。
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (_focusCountry != null) {
+          _leaveCountry();
+          return;
+        }
+        if (_selectedCountry != null) {
+          _clearSelection();
+          return;
+        }
+        final now = DateTime.now();
+        if (_lastBackAt != null &&
+            now.difference(_lastBackAt!) < const Duration(seconds: 2)) {
+          SystemNavigator.pop();
+          return;
+        }
+        _lastBackAt = now;
+        _toast('再按一次返回键退出');
+      },
+      child: Scaffold(
+        body: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final maxMapHeight = constraints.maxWidth * 1.16;
+              final mapHeight =
+                  (constraints.maxHeight * 0.58).clamp(240.0, maxMapHeight).toDouble();
+              return Column(
+                children: [
+                  _buildHeader(),
+                  SizedBox(
+                    height: mapHeight,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+                      child: _buildMapCard(),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 10),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
-                    child: _buildSummary(),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+                      child: _buildSummary(),
+                    ),
                   ),
-                ),
-                _buildBottomBar(),
-              ],
-            );
-          },
+                  _buildBottomBar(),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );

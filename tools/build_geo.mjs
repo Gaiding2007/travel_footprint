@@ -256,7 +256,9 @@ for (const id of geoById.keys()) {
   if (!names.has(id)) orphanGeo.push(id);
 }
 
-const WORLD_TOL = 0.03; // 世界地图在极小比例下显示，0.03°(约3km) 的简化肉眼不可见
+// 世界国家轮廓：0.03°(约 3km) 的简化肉眼不可见，但会把挪威北边那种小岛直接抹成一条线，
+// 所以降到 0.008°（约 0.9km），小岛至少能保留成一个小多边形。
+const WORLD_TOL = 0.008;
 const worldCountries = [];
 const seenWorld = new Set();
 for (const f of world.features) {
